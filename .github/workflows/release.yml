@@ -58,7 +58,9 @@ jobs:
           curl -fsSLo /tmp/gradle.zip.sha256 https://services.gradle.org/distributions/gradle-9.7.0-bin.zip.sha256
           echo "$(cat /tmp/gradle.zip.sha256)  /tmp/gradle.zip" | sha256sum -c -
           sudo unzip -q /tmp/gradle.zip -d /opt/gradle
-          echo "/opt/gradle/gradle-9.7.0/bin" >> "$GITHUB_PATH"
+          # Force the pinned 9.7.0 (the F-Droid build used 9.7.0) ahead of the image's gradle
+          sudo ln -sf /opt/gradle/gradle-9.7.0/bin/gradle /usr/local/bin/gradle
+          echo "which gradle -> $(command -v gradle)"
           gradle --version
 
       - name: Rust 1.95.0
@@ -68,10 +70,26 @@ jobs:
 
       - name: Android SDK components (NDK r29, platform, build-tools)
         run: |
-          sudo mkdir -p /opt && sudo ln -sfn /usr/lib/android-sdk /opt/android-sdk
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "ndk;29.0.14206865" "platforms;android-35" "build-tools;37.0.0" "platform-tools;37.0.0"
+          set -e
+          # Locate an existing sdkmanager; the runner's cmdline-tools layout varies
+          SM=""
+          for c in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager "$ANDROID_HOME"/cmdline-tools/bin/sdkmanager; do
+            [ -x "$c" ] && SM="$c" && break
+          done
+          if [ -z "$SM" ]; then
+            echo "cmdline-tools not found; installing (same component + checksum fennecbuild build.sh uses)"
+            curl --silent -O https://dl.google.com/android/repository/commandlinetools-linux-15641748_latest.zip
+            echo 'a66d5ef0238fc0162e9c1446602ce0dd41702d4dd7a94d2ce42d12b7f80baf7e  commandlinetools-linux-15641748_latest.zip' | sha256sum -c -
+            unzip -q commandlinetools-linux-15641748_latest.zip -d /tmp/clt
+            sudo mkdir -p "$ANDROID_HOME/cmdline-tools/21.0"
+            sudo cp -r /tmp/clt/cmdline-tools/. "$ANDROID_HOME/cmdline-tools/21.0/"
+            SM="$ANDROID_HOME/cmdline-tools/21.0/bin/sdkmanager"
+          fi
+          echo "sdkmanager: $SM"
+          # put sdkmanager on PATH (build.sh calls bare `sdkmanager`)
+          echo "$(cd "$(dirname "$SM")" && pwd)" >> "$GITHUB_PATH"
+          yes | "$SM" --licenses >/dev/null || true
+          "$SM" "ndk;29.0.14206865" "platforms;android-35" "build-tools;37.0.0" "platform-tools;37.0.0"
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           df -h /
@@ -120,6 +138,7 @@ jobs:
       - name: prebuild.sh (patches + configure)
         run: |
           chmod +x prebuild.sh build.sh
+          echo "gradle used by mozconfig: $(command -v gradle)"
           ./prebuild.sh "${{ inputs.version_name }}" "${{ inputs.version_code }}"
           df -h /
 
