@@ -86,12 +86,16 @@ jobs:
             SM="$ANDROID_HOME/cmdline-tools/21.0/bin/sdkmanager"
           fi
           echo "sdkmanager: $SM"
+          # The runner's /usr/lib/android-sdk is root-owned: sdkmanager (running as
+          # 'runner') cannot persist license acceptance or install properties there
+          # ("Failed to read or create install properties file") and re-prompts mid-install.
+          # Make the SDK root writable by the current user first.
+          sudo chown -R "$USER" "$ANDROID_HOME"
           # put sdkmanager on PATH (build.sh calls bare `sdkmanager`)
           echo "$(cd "$(dirname "$SM")" && pwd)" >> "$GITHUB_PATH"
-          # Accept licenses by answering the inline 'y/N' prompts (the reliable method).
+          # Accept licenses (non-interactive now that the dir is writable)
           yes | "$SM" --licenses
-          # The modern sdkmanager shows the license prompt INLINE during install too —
-          # pipe 'yes' into the install command so it answers y and actually installs.
+          # Install the components (no prompt expected; keep 'yes' as belt-and-braces)
           yes | "$SM" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
           # hard check: fail loudly if anything is actually missing
           for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/29.0.14206865 platform-tools; do
