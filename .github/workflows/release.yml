@@ -1,0 +1,216 @@
+name: Release
+
+# Builds Fennec F-Droid from the fennecbuild recipe (all of Firefox from
+# source), signs the unsigned APK and publishes a GitHub release, then
+# dispatches the custom F-Droid repo to pick it up.
+#
+# Free & unlimited on this public repo (standard ubuntu-latest runners).
+# Disk checkpoints (df) are logged throughout; a background df logger
+# records the whole run so any ENOSPC failure yields a complete disk map.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName"
+        required: false
+        default: "155.0.0"
+      version_code:
+        description: "versionCode (scheme XYZAR; R = revision)"
+        required: false
+        default: "1550020"
+
+env:
+  ANDROID_HOME: /usr/lib/android-sdk
+  NDK_VERSION: "29.0.14206865"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout fennecbuild
+        uses: actions/checkout@v4
+
+      - name: Disk checkpoint 0
+        run: |
+          echo "=== df (start) ==="; df -h / /home; free -h; nproc
+
+      - name: Install build dependencies (mirrors fdroiddata sudo block)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake make m4 pkg-config python-is-python3 \
+            python3-venv tcl gyp ninja-build bzip2 libffi-dev libsqlite3-dev \
+            binutils-dev clang lld libssl-dev zlib1g-dev nodejs terser rustup
+          df -h /
+
+      - name: Java 17
+        run: |
+          ls /usr/lib/jvm/
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          java -version
+
+      - name: Gradle 9.7.0 (system gradle, used by rewritten gradlew)
+        run: |
+          curl -fsSLo /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.7.0-bin.zip
+          curl -fsSLo /tmp/gradle.zip.sha256 https://services.gradle.org/distributions/gradle-9.7.0-bin.zip.sha256
+          echo "$(cat /tmp/gradle.zip.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          sudo unzip -q /tmp/gradle.zip -d /opt/gradle
+          echo "/opt/gradle/gradle-9.7.0/bin" >> "$GITHUB_PATH"
+          gradle --version
+
+      - name: Rust 1.95.0
+        run: |
+          rustup default 1.95.0
+          rustc --version
+
+      - name: Android SDK components (NDK r29, platform, build-tools)
+        run: |
+          sudo mkdir -p /opt && sudo ln -sfn /usr/lib/android-sdk /opt/android-sdk
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;29.0.14206865" "platforms;android-35" "build-tools;37.0.0" "platform-tools;37.0.0"
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
+          df -h /
+
+      - name: Clone srclibs (pinned, shallow)
+        run: |
+          set -e
+          SIB=..
+          mkdir -p "$SIB/srclib"
+          echo "=== MozFennec (mozilla-central @ FIREFOX-ANDROID_155_0_RELEASE)"
+          git clone --depth 1 --branch FIREFOX-ANDROID_155_0_RELEASE \
+            https://github.com/mozilla-firefox/firefox "$SIB/srclib/MozFennec"
+          df -h /
+          echo "=== MozAppServices @ v155.0 (+submodules)"
+          git clone --depth 1 --branch v155.0 https://github.com/mozilla/application-services "$SIB/srclib/MozAppServices"
+          (cd "$SIB/srclib/MozAppServices" && git submodule update --init --depth 1)
+          df -h /
+          echo "=== Glean (v68.0.1 / v68.0.0)"
+          git clone --depth 1 --branch v68.0.1 https://github.com/mozilla/glean "$SIB/srclib/MozGlean"
+          git clone --depth 1 --branch v68.0.0 https://github.com/mozilla/glean "$SIB/srclib/MozGleanAS"
+          echo "=== UnifiedPushAC @ 1.0.6"
+          git clone --depth 1 --branch 1.0.6 https://gitlab.com/ironfox-oss/unifiedpush-ac "$SIB/srclib/UnifiedPushAC"
+          echo "=== gmscore @ v0.3.16.252432"
+          git clone --depth 1 --branch v0.3.16.252432 https://github.com/microg/GmsCore "$SIB/srclib/gmscore"
+          echo "=== wasi-sdk @ wasi-sdk-20 (+submodules)"
+          git clone --depth 1 --branch wasi-sdk-20 https://github.com/WebAssembly/wasi-sdk "$SIB/srclib/wasi-sdk"
+          (cd "$SIB/srclib/wasi-sdk" && git submodule update --init --depth 1)
+          df -h /
+          echo "=== llvm @ 3b5e7c83 (llvm-project commit)"
+          git init "$SIB/srclib/llvm"
+          (cd "$SIB/srclib/llvm" && \
+            git remote add origin https://github.com/llvm/llvm-project && \
+            git fetch --depth 1 origin 3b5e7c83a6e226d5bd7ed2e9b67449b64812074c && \
+            git checkout -q FETCH_HEAD)
+          df -h /
+          echo "=== llvm_android @ e727bfb0 (full clone: googlesource SHA checkout)"
+          git clone https://android.googlesource.com/toolchain/llvm_android "$SIB/srclib/llvm_android"
+          (cd "$SIB/srclib/llvm_android" && git checkout -q e727bfb014bd436f581a66a450c939a6983a1fc3)
+          echo "=== toolchain-utils @ dd1ee45a (full clone: googlesource SHA checkout)"
+          git clone https://android.googlesource.com/platform/external/toolchain-utils "$SIB/srclib/toolchain-utils"
+          (cd "$SIB/srclib/toolchain-utils" && git checkout -q dd1ee45a84cb07337f9d5d0a6769d9b865c6e620)
+          df -h /
+          echo "=== srclib sizes ==="
+          du -sh "$SIB"/srclib/*
+
+      - name: prebuild.sh (patches + configure)
+        run: |
+          chmod +x prebuild.sh build.sh
+          ./prebuild.sh "${{ inputs.version_name }}" "${{ inputs.version_code }}"
+          df -h /
+
+      - name: build.sh (LLVM, WASI, GmsCore, Glean, Gecko, Fenix) with df logger
+        run: |
+          # Background logger: full disk+mem history so any ENOSPC is diagnosable
+          ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
+            > "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
+          set -o pipefail
+          ./build.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_full.log"
+          rc=${PIPESTATUS[0]}
+          kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          echo "=== df (end) ==="; df -h /
+          exit "$rc"
+
+      - name: Locate unsigned APK
+        id: apk
+        run: |
+          set -e
+          APKDIR=../srclib/MozFennec/obj/gradle/build/mobile/android/fenix/app/outputs/apk/release
+          ls -la "$APKDIR"
+          shopt -s nullglob
+          apks=("$APKDIR"/app-*-release-unsigned.apk)
+          [ ${#apks[@]} -gt 0 ] || { echo "NO APK FOUND"; tail -80 "$GITHUB_WORKSPACE/build_full.log"; exit 1; }
+          # arm64 for the Pixel 8a
+          pick=""
+          for a in "${apks[@]}"; do case "$a" in *arm64*) pick="$a";; esac; done
+          [ -n "$pick" ] || pick="${apks[0]}"
+          echo "apk=$pick" >> "$GITHUB_OUTPUT"
+          echo "Picked: $pick"; ls -la "$pick"
+
+      - name: Sign APK (permanent release key)
+        if: steps.apk.outcome == 'success'
+        env:
+          FENNEC_KEYSTORE_BASE64: ${{ secrets.FENNEC_KEYSTORE_BASE64 }}
+          FENNEC_STORE_PASS: ${{ secrets.FENNEC_STORE_PASS }}
+          FENNEC_KEY_PASS: ${{ secrets.FENNEC_KEY_PASS }}
+        run: |
+          set -e
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          [ -x "$BT/apksigner" ] || { echo "apksigner missing"; ls "$BT"; exit 1; }
+          echo "$FENNEC_KEYSTORE_BASE64" | base64 -d > fennec-release.jks
+          UNSIGNED="${{ steps.apk.outputs.apk }}"
+          SIGNED="Fennec-${{ inputs.version_code }}-${GITHUB_SHA::7}.apk"
+          cp "$UNSIGNED" unsigned.apk
+          "$BT/zipalign" -f 4 unsigned.apk aligned.apk
+          "$BT/apksigner" sign \
+            --ks fennec-release.jks --ks-key-alias fennecrelease \
+            --ks-pass "pass:$FENNEC_STORE_PASS" --key-pass "pass:$FENNEC_KEY_PASS" \
+            --out "$SIGNED" aligned.apk
+          "$BT/apksigner" verify --print-certs "$SIGNED"
+          ls -la "$SIGNED"
+          echo "SIGNED_APK=$SIGNED" >> "$GITHUB_ENV"
+          echo "artifact=$SIGNED" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed APK (artifact)
+        if: steps.apk.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fennec-signed
+          path: ${{ env.SIGNED_APK }}
+
+      - name: Publish GitHub release
+        if: steps.apk.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ls -la Fennec-*.apk
+          TAG="fennec-${{ inputs.version_name }}-${{ inputs.version_code }}"
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name }} (versionCode ${{ inputs.version_code }})"
+            echo ""
+            echo "Built from haasanen/fennecbuild @ ${GITHUB_SHA}"
+            echo "Same base as the official Fennec F-Droid build; signed with the fork's permanent release key."
+          } > "$NOTES_FILE"
+          gh release create "$TAG" "Fennec-"*.apk \
+            --title "Fennec ${{ inputs.version_name }} (${{ inputs.version_code }})" \
+            --notes-file "$NOTES_FILE" || \
+          gh release upload "$TAG" "Fennec-"*.apk --clobber
+
+      - name: Notify F-Droid repo (push trigger, fail-open)
+        if: steps.apk.outcome == 'success'
+        env:
+          FDROID_DISPATCH_TOKEN: ${{ secrets.FDROID_DISPATCH_TOKEN }}
+        run: |
+          [ -z "${FDROID_DISPATCH_TOKEN:-}" ] && { echo "no dispatch token, skipping"; exit 0; }
+          curl -sS -o /dev/null -w "dispatch HTTP %{http_code}\n" -X POST \
+            -H "Authorization: Bearer $FDROID_DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/haasanen/fdroid-repo/actions/workflows/update.yml/dispatches \
+            -d '{"ref":"main"}' || true
