@@ -89,10 +89,8 @@ jobs:
           # put sdkmanager on PATH (build.sh calls bare `sdkmanager`)
           echo "$(cd "$(dirname "$SM")" && pwd)" >> "$GITHUB_PATH"
           yes | "$SM" --licenses >/dev/null || true
-          "$SM" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-37" "build-tools;37.0.0" "platform-tools"
-          # build.sh checks these /opt/android-sdk paths and would re-download
-          # cmdline-tools + platform-37.1 if missing — create markers to skip
-          sudo mkdir -p /opt/android-sdk/cmdline-tools/21.0 /opt/android-sdk/platforms/android-37.1
+          "$SM" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
+          echo "installed platforms:"; ls "$ANDROID_HOME/platforms"
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           df -h /
