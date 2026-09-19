@@ -1,0 +1,43 @@
+name: Runner probe
+
+# Identifies which GitHub larger-runner labels this account can schedule,
+# and reports cores/RAM/disk. Each job is a cheap ~1 min no-op.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe-16xlarge:
+    runs-on: linux-x64-16xlarge
+    timeout-minutes: 8
+    steps:
+      - name: Identify
+        run: |
+          echo "label=linux-x64-16xlarge arch=$(uname -m) cores=$(nproc) memGB=$(free -g | awk '/^Mem:/{print $2}')"
+          echo "disk: $(df -h /home | tail -1 | awk '{print "size="$2" free="$4}')"
+
+  probe-12xlarge:
+    runs-on: linux-x64-12xlarge
+    timeout-minutes: 8
+    steps:
+      - name: Identify
+        run: |
+          echo "label=linux-x64-12xlarge arch=$(uname -m) cores=$(nproc) memGB=$(free -g | awk '/^Mem:/{print $2}')"
+          echo "disk: $(df -h /home | tail -1 | awk '{print "size="$2" free="$4}')"
+
+  probe-8xlarge:
+    runs-on: linux-x64-8xlarge
+    timeout-minutes: 8
+    steps:
+      - name: Identify
+        run: |
+          echo "label=linux-x64-8xlarge arch=$(uname -m) cores=$(nproc) memGB=$(free -g | awk '/^Mem:/{print $2}')"
+          echo "disk: $(df -h /home | tail -1 | awk '{print "size="$2" free="$4}')"
+
+  probe-2xlarge:
+    runs-on: linux-x64-2xlarge
+    timeout-minutes: 8
+    steps:
+      - name: Identify
+        run: |
+          echo "label=linux-x64-2xlarge arch=$(uname -m) cores=$(nproc) memGB=$(free -g | awk '/^Mem:/{print $2}')"
+          echo "disk: $(df -h /home | tail -1 | awk '{print "size="$2" free="$4}')"
