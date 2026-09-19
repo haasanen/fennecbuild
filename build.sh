@@ -28,7 +28,7 @@ source "$(dirname "$0")/paths.sh"
 
 # Set up Android SDK for GeckoView
 sdkmanager 'build-tools;37.0.0'
-sdkmanager 'platform-tools;37.0.0'
+sdkmanager 'platform-tools'
 
 # Install some Android SDK components manually, see
 # https://gitlab.com/fdroid/sdkmanager/-/work_items/31
