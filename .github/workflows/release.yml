@@ -52,16 +52,16 @@ jobs:
           echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
           java -version
 
-      - name: Gradle 9.7.0 (system gradle, used by rewritten gradlew)
+      - name: Gradle (version-aware shim, mirrors F-Droid's per-project wrapper)
         run: |
-          curl -fsSLo /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.7.0-bin.zip
-          curl -fsSLo /tmp/gradle.zip.sha256 https://services.gradle.org/distributions/gradle-9.7.0-bin.zip.sha256
-          echo "$(cat /tmp/gradle.zip.sha256)  /tmp/gradle.zip" | sha256sum -c -
-          sudo unzip -q /tmp/gradle.zip -d /opt/gradle
-          # Force the pinned 9.7.0 (the F-Droid build used 9.7.0) ahead of the image's gradle
-          sudo ln -sf /opt/gradle/gradle-9.7.0/bin/gradle /usr/local/bin/gradle
+          # F-Droid does not pin one Gradle globally: each project's build runs on
+          # its own gradle-wrapper.properties version (gmscore 8.13, glean/app-services
+          # 8.14.3, geckoview/fenix 9.7.0). A single 9.7.0 breaks gmscore (its AGP
+          # uses InternalProblems, removed in Gradle 9.6.0). Replicate F-Droid:
+          # a shim that reads the current project's wrapper and uses that version.
+          install -m 0755 gradle-wrapper.sh /usr/local/bin/gradle
           echo "which gradle -> $(command -v gradle)"
-          gradle --version
+          cat /usr/local/bin/gradle | head -5
 
       - name: Rust 1.95.0
         run: |
