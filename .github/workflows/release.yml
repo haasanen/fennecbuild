@@ -22,6 +22,10 @@ on:
 
 env:
   ANDROID_HOME: /usr/lib/android-sdk
+  # The runner image bakes ANDROID_SDK_ROOT=/usr/local/lib/android/sdk into its
+  # env. gmscore's AGP (Gradle 8.13) refuses to run when the two point at
+  # different SDK roots. Pin both to the same directory (F-Droid uses one root).
+  ANDROID_SDK_ROOT: /usr/lib/android-sdk
   NDK_VERSION: "29.0.14206865"
 
 jobs:
