@@ -56,6 +56,17 @@ jobs:
           echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
           java -version
 
+      - name: Restore tools caches (gradle dists, rust, cargo)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /opt/gradle-versions
+            ~/.cargo
+            ~/.rustup
+          # static keys: every input is pinned to an exact commit/version, so
+          # the caches stay valid until a pin changes (bump the key suffix then)
+          key: fennec-tools-v1
+
       - name: Gradle (version-aware shim, mirrors F-Droid's per-project wrapper)
         run: |
           # F-Droid does not pin one Gradle globally: each project's build runs on
@@ -71,6 +82,13 @@ jobs:
         run: |
           rustup default 1.95.0
           rustc --version
+
+      - name: Cache Android SDK
+        id: sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /usr/lib/android-sdk
+          key: fennec-sdk-r29-37.0-37.1-v1
 
       - name: Android SDK components (NDK r29, platform, build-tools)
         run: |
@@ -158,6 +176,20 @@ jobs:
           ./prebuild.sh "${{ inputs.version_name }}" "${{ inputs.version_code }}"
           df -h /
 
+      - name: Restore LLVM toolchain (if cached from a previous run)
+        id: llvm-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ../srclib/llvm/out
+          key: fennec-llvm-out-3b5e7c83-v1
+
+      - name: Restore WASI toolchain (if cached from a previous run)
+        id: wasi-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ../srclib/wasi-sdk/build/install/wasi
+          key: fennec-wasi-out-v1
+
       - name: build.sh (LLVM, WASI, GmsCore, Glean, Gecko, Fenix) with df logger
         run: |
           # Background logger: full disk+mem history so any ENOSPC is diagnosable
@@ -171,6 +203,57 @@ jobs:
           echo "=== df (end) ==="; df -h /
           exit "$rc"
 
+      - name: Save LLVM toolchain cache (only when install completed; 10GB guard)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          if [ ! -e ../srclib/llvm/out/CI_DONE ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
+          b=$(du -sb ../srclib/llvm/out 2>/dev/null | awk '{print $1}')
+          [ -n "$b" ] || b=$(( $(du -sk ../srclib/llvm/out 2>/dev/null | awk '{print $1}') * 1024 ))
+          gb=$(awk -v b="${b:-0}" 'BEGIN{printf "%.1f", b/1073741824}')
+          if [ -n "$b" ] && awk -v g="$gb" 'BEGIN{exit !(g < 9.5)}'; then
+            echo "LLVM out = ${gb} GB — saving cache"
+            echo "LLVM-out:../srclib/llvm/out" >> "$GITHUB_ENV"
+          else
+            echo "LLVM out = ${gb:-?} GB — skipping save (would approach the 10 GB cache limit)"
+          fi
+          set -e
+      - name: Cache LLVM out
+        if: env.LLVM-out != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ../srclib/llvm/out
+          key: fennec-llvm-out-3b5e7c83-v1
+      - name: Save WASI toolchain cache (only when install completed; 10GB guard)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          if [ ! -e ../srclib/wasi-sdk/build/install/wasi/CI_DONE ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
+          b=$(du -sb ../srclib/wasi-sdk/build/install/wasi 2>/dev/null | awk '{print $1}')
+          [ -n "$b" ] || b=$(( $(du -sk ../srclib/wasi-sdk/build/install/wasi 2>/dev/null | awk '{print $1}') * 1024 ))
+          gb=$(awk -v b="${b:-0}" 'BEGIN{printf "%.1f", b/1073741824}')
+          if [ -n "$b" ] && awk -v g="$gb" 'BEGIN{exit !(g < 9.5)}'; then
+            echo "WASI install = ${gb} GB — saving cache"
+            echo "WASI-out:../srclib/wasi-sdk/build/install/wasi" >> "$GITHUB_ENV"
+          else
+            echo "WASI install = ${gb:-?} GB — skipping save (would approach the 10 GB cache limit)"
+          fi
+          set -e
+      - name: Cache WASI out
+        if: env.WASI-out != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ../srclib/wasi-sdk/build/install/wasi
+          key: fennec-wasi-out-v1
+      - name: Upload build logs (diagnostics)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          if-no-files-found: ignore
+          path: |
+            df_history.log
+            build_full.log
       - name: Locate unsigned APK
         id: apk
         run: |

@@ -50,26 +50,37 @@ fi
 # Set up Rust
 cargo install --force --vers 0.29.4 cbindgen
 
-# Build LLVM
+# Build LLVM (skip when a completed install exists, e.g. restored from the
+# CI cache — the install takes ~100 min to build)
 pushd "$llvm"
-llvmtarget=$(cat "$llvm/targets_to_build")
-cmake -S llvm -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=out -DCMAKE_C_COMPILER=clang \
-    -DCMAKE_CXX_COMPILER=clang++ -DLLVM_ENABLE_PROJECTS="clang" -DLLVM_TARGETS_TO_BUILD="$llvmtarget" \
-    -DLLVM_USE_LINKER=lld -DLLVM_BINUTILS_INCDIR=/usr/include -DLLVM_ENABLE_PLUGINS=FORCE_ON \
-    -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-unknown-linux-gnu"
-cmake --build build -j"$(nproc)"
-cmake --build build --target install -j"$(nproc)"
+if [ -d "$llvm/out/lib" ] && [ -e "$llvm/out/CI_DONE" ]; then
+    echo "LLVM install present (restored from cache) — skipping build"
+else
+    llvmtarget=$(cat "$llvm/targets_to_build")
+    cmake -S llvm -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=out -DCMAKE_C_COMPILER=clang \
+        -DCMAKE_CXX_COMPILER=clang++ -DLLVM_ENABLE_PROJECTS="clang" -DLLVM_TARGETS_TO_BUILD="$llvmtarget" \
+        -DLLVM_USE_LINKER=lld -DLLVM_BINUTILS_INCDIR=/usr/include -DLLVM_ENABLE_PLUGINS=FORCE_ON \
+        -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-unknown-linux-gnu"
+    cmake --build build -j"$(nproc)"
+    cmake --build build --target install -j"$(nproc)"
+    touch "$llvm/out/CI_DONE"
+fi
 popd
 
-# Build WASI SDK
+# Build WASI SDK (skip when the sysroot install exists, e.g. restored from cache)
 pushd "$wasi"
-mkdir -p build/install/wasi
-touch build/compiler-rt.BUILT # fool the build system
-make \
-    PREFIX=/wasi \
-    build/wasi-libc.BUILT \
-    build/libcxx.BUILT \
-    -j"$(nproc)"
+if [ -d "$wasi/build/install/wasi/share/wasi-sysroot" ] && [ -e "$wasi/build/install/wasi/CI_DONE" ]; then
+    echo "WASI install present (restored from cache) — skipping build"
+else
+    mkdir -p build/install/wasi
+    touch build/compiler-rt.BUILT # fool the build system
+    make \
+        PREFIX=/wasi \
+        build/wasi-libc.BUILT \
+        build/libcxx.BUILT \
+        -j"$(nproc)"
+    touch build/install/wasi/CI_DONE
+fi
 popd
 
 # Build microG libraries
