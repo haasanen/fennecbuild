@@ -88,8 +88,21 @@ jobs:
           echo "sdkmanager: $SM"
           # put sdkmanager on PATH (build.sh calls bare `sdkmanager`)
           echo "$(cd "$(dirname "$SM")" && pwd)" >> "$GITHUB_PATH"
-          yes | "$SM" --licenses >/dev/null || true
+          # Pre-accept the SDK licenses with their stable hashes (non-interactive,
+          # reliable across sdkmanager versions)
+          sudo mkdir -p "$ANDROID_HOME/licenses"
+          {
+            echo "8933bad161af4178b1185d1a37fbf41ea5269c55"
+            echo "d56f5187479451eabf01fb78af6dfcb131a6481e"
+            echo "d4dd20e7949f67c9b348c0fa3d0a403b8c99071c"
+          } | sudo tee "$ANDROID_HOME/licenses/android-sdk-license" >/dev/null
+          echo "60f071444e5526a08f757a514dc29bb75c44bbca" | sudo tee "$ANDROID_HOME/licenses/android-googletv-license" >/dev/null
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" | sudo tee "$ANDROID_HOME/licenses/android-sdk-preview-license" >/dev/null
           "$SM" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
+          # hard check: fail loudly if anything is actually missing
+          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/29.0.14206865; do
+            [ -d "$ANDROID_HOME/$d" ] || { echo "MISSING $ANDROID_HOME/$d"; ls -la "$ANDROID_HOME"; exit 1; }
+          done
           echo "installed platforms:"; ls "$ANDROID_HOME/platforms"
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
