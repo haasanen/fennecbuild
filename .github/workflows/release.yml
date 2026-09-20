@@ -204,20 +204,26 @@ jobs:
 
       - name: Save LLVM toolchain cache (right after the LLVM phase completes)
         run: |
-          set +e
-          if [ ! -e ../srclib/llvm/out/CI_DONE ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
-          b=$(du -sb ../srclib/llvm/out 2>/dev/null | awk '{print $1}')
-          [ -n "$b" ] || b=$(( $(du -sk ../srclib/llvm/out 2>/dev/null | awk '{print $1}') * 1024 ))
-          gb=$(awk -v b="${b:-0}" 'BEGIN{printf "%.1f", b/1073741824}')
-          if [ -n "$b" ] && awk -v g="$gb" 'BEGIN{exit !(g < 9.5)}'; then
-            echo "LLVM out = ${gb} GB — saving cache"
-            echo "LLVM-out:../srclib/llvm/out" >> "$GITHUB_ENV"
-          else
-            echo "LLVM out = ${gb:-?} GB — skipping save (would approach the 10 GB cache limit)"
+          OUT=../srclib/llvm/out
+          if [ ! -e "$OUT/CI_DONE" ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
+          if [ ! -d "$OUT" ]; then echo "LLVM out dir missing — not saving"; exit 0; fi
+          b=$(du -sb "$OUT" 2>/dev/null | awk '{print $1}')
+          if [ -z "$b" ]; then
+            b=$(( $(du -sk "$OUT" 2>/dev/null | awk '{print $1}' || echo 0) * 1024 ))
           fi
-          set -e
+          gb=$(awk -v b="${b:-0}" 'BEGIN{printf "%.1f", b/1073741824}')
+          if awk -v g="$gb" 'BEGIN{exit !(g < 9.5)}'; then
+            echo "LLVM out = ${gb} GB — saving cache"
+            echo "LLVM_OUT=1" >> "$GITHUB_ENV"
+          else
+            echo "LLVM out = ${gb} GB — skipping save (>= 9.5 GB cache limit)"
+          fi
+          # A cache-save hiccup must NEVER sink the build (run 35498864447 failed
+          # here at ~60 min, after a successful LLVM compile). Exit 0 unconditionally.
+          exit 0
       - name: Cache LLVM out
-        if: env.LLVM-out != ''
+        if: env.LLVM_OUT == '1'
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ../srclib/llvm/out
@@ -237,20 +243,24 @@ jobs:
 
       - name: Save WASI toolchain cache (right after the WASI phase completes)
         run: |
-          set +e
-          if [ ! -e ../srclib/wasi-sdk/build/install/wasi/CI_DONE ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
-          b=$(du -sb ../srclib/wasi-sdk/build/install/wasi 2>/dev/null | awk '{print $1}')
-          [ -n "$b" ] || b=$(( $(du -sk ../srclib/wasi-sdk/build/install/wasi 2>/dev/null | awk '{print $1}') * 1024 ))
-          gb=$(awk -v b="${b:-0}" 'BEGIN{printf "%.1f", b/1073741824}')
-          if [ -n "$b" ] && awk -v g="$gb" 'BEGIN{exit !(g < 9.5)}'; then
-            echo "WASI install = ${gb} GB — saving cache"
-            echo "WASI-out:../srclib/wasi-sdk/build/install/wasi" >> "$GITHUB_ENV"
-          else
-            echo "WASI install = ${gb:-?} GB — skipping save (would approach the 10 GB cache limit)"
+          OUT=../srclib/wasi-sdk/build/install/wasi
+          if [ ! -e "$OUT/CI_DONE" ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
+          if [ ! -d "$OUT" ]; then echo "WASI install dir missing — not saving"; exit 0; fi
+          b=$(du -sb "$OUT" 2>/dev/null | awk '{print $1}')
+          if [ -z "$b" ]; then
+            b=$(( $(du -sk "$OUT" 2>/dev/null | awk '{print $1}' || echo 0) * 1024 ))
           fi
-          set -e
+          gb=$(awk -v b="${b:-0}" 'BEGIN{printf "%.1f", b/1073741824}')
+          if awk -v g="$gb" 'BEGIN{exit !(g < 9.5)}'; then
+            echo "WASI install = ${gb} GB — saving cache"
+            echo "WASI_OUT=1" >> "$GITHUB_ENV"
+          else
+            echo "WASI install = ${gb} GB — skipping save (>= 9.5 GB cache limit)"
+          fi
+          exit 0
       - name: Cache WASI out
-        if: env.WASI-out != ''
+        if: env.WASI_OUT == '1'
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ../srclib/wasi-sdk/build/install/wasi
