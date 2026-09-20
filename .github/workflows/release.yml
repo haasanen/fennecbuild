@@ -207,10 +207,13 @@ jobs:
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
             > "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
+          bash ci_heartbeat.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build_llvm.log" &
+          echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
           set -o pipefail
           ./build-llvm.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_llvm.log"
           rc=${PIPESTATUS[0]}
           kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (after LLVM) ==="; df -h /
           exit "$rc"
 
@@ -246,10 +249,13 @@ jobs:
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
             >> "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
+          bash ci_heartbeat.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build_wasi.log" &
+          echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
           set -o pipefail
           ./build-wasi.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_wasi.log"
           rc=${PIPESTATUS[0]}
           kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (after WASI) ==="; df -h /
           exit "$rc"
 
@@ -283,10 +289,13 @@ jobs:
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
             >> "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
+          bash ci_heartbeat.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build_full.log" &
+          echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
           set -o pipefail
           ./build-rest.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_full.log"
           rc=${PIPESTATUS[0]}
           kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (end) ==="; df -h /
           exit "$rc"
 
@@ -298,6 +307,8 @@ jobs:
           if-no-files-found: ignore
           path: |
             df_history.log
+            build_llvm.log
+            build_wasi.log
             build_full.log
       - name: Locate unsigned APK
         id: apk
