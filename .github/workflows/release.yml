@@ -177,7 +177,9 @@ jobs:
         run: |
           chmod +x prebuild.sh build.sh
           echo "gradle used by mozconfig: $(command -v gradle)"
-          ./prebuild.sh "${{ inputs.version_name }}" "${{ inputs.version_code }}"
+          # inputs.* are empty on push-triggered runs (defaults apply to
+          # workflow_dispatch only) — fall back to the release version.
+          ./prebuild.sh "${{ inputs.version_name || '155.0.0' }}" "${{ inputs.version_code || '1550020' }}"
           df -h /
 
       - name: Restore LLVM toolchain (if cached from a previous run)
