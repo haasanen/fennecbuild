@@ -190,21 +190,19 @@ jobs:
           path: ../srclib/wasi-sdk/build/install/wasi
           key: fennec-wasi-out-v1
 
-      - name: build.sh (LLVM, WASI, GmsCore, Glean, Gecko, Fenix) with df logger
+      - name: Phase 1/3 — LLVM toolchain (or restore from cache)
         run: |
-          # Background logger: full disk+mem history so any ENOSPC is diagnosable
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
             > "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
           set -o pipefail
-          ./build.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_full.log"
+          ./build-llvm.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_llvm.log"
           rc=${PIPESTATUS[0]}
           kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
-          echo "=== df (end) ==="; df -h /
+          echo "=== df (after LLVM) ==="; df -h /
           exit "$rc"
 
-      - name: Save LLVM toolchain cache (only when install completed; 10GB guard)
-        if: ${{ !cancelled() }}
+      - name: Save LLVM toolchain cache (right after the LLVM phase completes)
         run: |
           set +e
           if [ ! -e ../srclib/llvm/out/CI_DONE ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
@@ -224,8 +222,20 @@ jobs:
         with:
           path: ../srclib/llvm/out
           key: fennec-llvm-out-3b5e7c83-v1
-      - name: Save WASI toolchain cache (only when install completed; 10GB guard)
-        if: ${{ !cancelled() }}
+
+      - name: Phase 2/3 — WASI SDK (or restore from cache)
+        run: |
+          ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
+            >> "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
+          set -o pipefail
+          ./build-wasi.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_wasi.log"
+          rc=${PIPESTATUS[0]}
+          kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          echo "=== df (after WASI) ==="; df -h /
+          exit "$rc"
+
+      - name: Save WASI toolchain cache (right after the WASI phase completes)
         run: |
           set +e
           if [ ! -e ../srclib/wasi-sdk/build/install/wasi/CI_DONE ]; then echo "no CI_DONE marker — not saving"; exit 0; fi
@@ -245,6 +255,19 @@ jobs:
         with:
           path: ../srclib/wasi-sdk/build/install/wasi
           key: fennec-wasi-out-v1
+
+      - name: Phase 3/3 — GmsCore, Glean, Gecko, Fenix (the long tail)
+        run: |
+          ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
+            >> "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
+          set -o pipefail
+          ./build-rest.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_full.log"
+          rc=${PIPESTATUS[0]}
+          kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          echo "=== df (end) ==="; df -h /
+          exit "$rc"
+
       - name: Upload build logs (diagnostics)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
