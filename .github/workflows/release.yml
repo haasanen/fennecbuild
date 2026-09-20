@@ -321,7 +321,7 @@ jobs:
           [ -x "$BT/apksigner" ] || { echo "apksigner missing"; ls "$BT"; exit 1; }
           echo "$FENNEC_KEYSTORE_BASE64" | base64 -d > fennec-release.jks
           UNSIGNED="${{ steps.apk.outputs.apk }}"
-          SIGNED="Fennec-${{ inputs.version_code }}-${GITHUB_SHA::7}.apk"
+          SIGNED="Fennec-${{ inputs.version_code || '1550020' }}-${GITHUB_SHA::7}.apk"
           cp "$UNSIGNED" unsigned.apk
           "$BT/zipalign" -f 4 unsigned.apk aligned.apk
           "$BT/apksigner" sign \
@@ -347,16 +347,16 @@ jobs:
         run: |
           set -e
           ls -la Fennec-*.apk
-          TAG="fennec-${{ inputs.version_name }}-${{ inputs.version_code }}"
+          TAG="fennec-${{ inputs.version_name || '155.0.0' }}-${{ inputs.version_code || '1550020' }}"
           NOTES_FILE="$(mktemp)"
           {
-            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name }} (versionCode ${{ inputs.version_code }})"
+            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name || '155.0.0' }} (versionCode ${{ inputs.version_code || '1550020' }})"
             echo ""
             echo "Built from haasanen/fennecbuild @ ${GITHUB_SHA}"
             echo "Same base as the official Fennec F-Droid build; signed with the fork's permanent release key."
           } > "$NOTES_FILE"
           gh release create "$TAG" "Fennec-"*.apk \
-            --title "Fennec ${{ inputs.version_name }} (${{ inputs.version_code }})" \
+            --title "Fennec ${{ inputs.version_name || '155.0.0' }} (${{ inputs.version_code || '1550020' }})" \
             --notes-file "$NOTES_FILE" || \
           gh release upload "$TAG" "Fennec-"*.apk --clobber
 
