@@ -36,6 +36,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    # One build at a time: parallel runs save to the same cache keys and clobber
+    # each other (2026-09-20: two overlapping runs, both cache saves looked OK,
+    # the next run's restores still missed). Extra pushes queue instead.
+    concurrency:
+      group: fennec-build
+      cancel-in-progress: false
     steps:
       - name: Checkout fennecbuild
         uses: actions/checkout@v4
