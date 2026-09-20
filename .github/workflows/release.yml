@@ -9,6 +9,10 @@ name: Release
 # records the whole run so any ENOSPC failure yields a complete disk map.
 
 on:
+  # Every push to master starts a full build. (The repo PAT can push but 403s on
+  # workflow_dispatch — no admin scope — so the push trigger is the reliable trigger.)
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       version_name:
