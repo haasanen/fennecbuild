@@ -95,6 +95,10 @@ while true; do
         git config user.name "fennec-ci"
         git config user.email "fennec-ci@users.noreply.github.com"
         git add heartbeat.txt
+        # Self-report: if the push itself is failing, the debug log tells us why —
+        # and the job-logs artifact is unreadable (PAT lacks artifact scope), so
+        # the branch is the only channel back.
+        if [ -s "$HBD" ]; then cp "$HBD" heartbeat_debug.txt; git add heartbeat_debug.txt; fi
         git commit -qm "heartbeat $(date -u +%H:%M:%S) run=${GITHUB_RUN_ID}" 2>>"$HBD"
         # A concurrent run (or a late heartbeat) can make the push fail; that
         # just drops one heartbeat, it must never affect the build.
@@ -102,7 +106,9 @@ while true; do
                 git push -q -f origin ci-logs >>"$HBD" 2>&1; then
             echo "heartbeat#$n $(date -u +%H:%M:%S) pushed OK" >> "$HBD"
         else
-            echo "heartbeat#$n $(date -u +%H:%M:%S) PUSH FAILED rc=$?" >> "$HBD"
+            rc=$?
+            echo "heartbeat#$n $(date -u +%H:%M:%S) PUSH FAILED rc=$rc" >> "$HBD"
+            echo "WARNING: fennec ci-logs heartbeat push failed (rc=$rc) — see ci_heartbeat_debug.log in the build-logs artifact"
         fi
         # Fallback record in the workspace: if the push never works, the
         # build-logs artifact still carries the last known state.
