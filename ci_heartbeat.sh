@@ -24,6 +24,14 @@
 # If a GitHub-hosted runner dies mid-build, the last heartbeat on that branch
 # is the only forensics available — the repo PAT cannot download job logs or
 # artifacts (no admin scope), so this branch is the readable record.
+#
+# Forensics (2026-09-21): the original version never pushed (ci-logs branch
+# absent after two runs) and failed SILENTLY: clone stderr went to /dev/null,
+# a hung credential prompt would hang the loop forever, and a failing
+# `checkout -b` exited the script at the `|| break`. Fixed: token via
+# GIT_ASKPASS (no prompt possible), clone timeouts + fallback, clone/push
+# stderr captured to $WORK/ci_heartbeat_debug.log, and the loop can no longer
+# die silently.
 
 WORK="$1"
 LOG="$2"
@@ -33,31 +41,74 @@ if [ -z "$TOKEN" ]; then
     echo "ci_heartbeat: no GITHUB_TOKEN — heartbeat disabled"
     exit 0
 fi
-REPO_URL="https://x-acce...OKEN}@${GITHUB_SERVER_URL:-github.com}/haasanen/fennecbuild.git"
+REPO_URL="https://***@${GITHUB_SERVER_URL:-github.com}/haasanen/fennecbuild.git"
 
+# Git may prompt for credentials if the token in the URL is rejected; on a
+# non-interactive runner that HANGS. GIT_ASKPASS makes credential requests
+# explicit: they use the token once and fail cleanly instead of hanging.
+ASKPASS="$WORK/.git_askpass.sh"
+printf '#!/bin/sh\ncase "$1" in *ser*name*) printf %%s "ci-heartbeat" ;; *) printf %%s "%s" ;; esac\n' "$TOKEN" > "$ASKPASS"
+chmod 700 "$ASKPASS"
+
+HBD="$WORK/ci_heartbeat_debug.log"
+{
+    echo "=== heartbeat started $(date -u +%H:%M:%S) UTC run=${GITHUB_RUN_ID} log=$LOG ==="
+    df -h / | tail -1
+    ls -la "$LOG" 2>&1
+} >> "$HBD" 2>&1
+
+n=0
 while true; do
+    n=$((n + 1))
     TMP=$(mktemp -d)
-    if git clone -q --depth 1 --branch ci-logs "$REPO_URL" "$TMP" 2>/dev/null; then
-        :
-    else
-        # First heartbeat of the run: create the branch from the repo.
-        git clone -q --depth 1 "$REPO_URL" "$TMP" 2>/dev/null || break
-        git -C "$TMP" checkout -q -b ci-logs
+    if ! git clone -q --timeout=60 --depth 1 --branch ci-logs "$REPO_URL" "$TMP" \
+            2>>"$HBD"; then
+        # First heartbeat of the run: the branch does not exist yet.
+        rm -rf "$TMP"; TMP=$(mktemp -d)
+        if ! git clone -q --timeout=60 "$REPO_URL" "$TMP" 2>>"$HBD"; then
+            echo "heartbeat#$n $(date -u +%H:%M:%S) clone failed (see $HBD)" >> "$HBD"
+            rm -rf "$TMP"
+            sleep 240
+            continue
+        fi
     fi
-    {
-        echo "=== $(date -u +%H:%M:%S) UTC  run=${GITHUB_RUN_ID} sha=$(git -C "$WORK" rev-parse --short HEAD 2>/dev/null) ==="
-        df -h / | tail -1
-        free -h | head -2
-        echo "--- build log tail (last 60 lines) ---"
-        tail -n 60 "$LOG" 2>/dev/null
-    } > "$TMP/heartbeat.txt"
-    git -C "$TMP" config user.name "fennec-ci"
-    git -C "$TMP" config user.email "fennec-ci@users.noreply.github.com"
-    git -C "$TMP" add heartbeat.txt
-    git -C "$TMP" commit -qm "heartbeat $(date -u +%H:%M:%S) run=${GITHUB_RUN_ID}"
-    # A concurrent run (or a late heartbeat) can make the push fail; that just
-    # drops one heartbeat, it must never affect the build.
-    git -C "$TMP" push -q origin ci-logs 2>/dev/null || true
+    if [ ! -d "$TMP/.git" ]; then
+        echo "heartbeat#$n $(date -u +%H:%M:%S) clone produced no .git — skipping" >> "$HBD"
+        rm -rf "$TMP"
+        sleep 240
+        continue
+    fi
+    (
+        cd "$TMP" 2>/dev/null || exit 9
+        if ! git show-ref --verify --quiet refs/heads/ci-logs 2>>"$HBD"; then
+            if ! git checkout -q -b ci-logs 2>>"$HBD"; then
+                git checkout -q --track origin/ci-logs 2>>"$HBD" || exit 8
+            fi
+        fi
+        {
+            echo "=== $(date -u +%H:%M:%S) UTC  run=${GITHUB_RUN_ID} sha=$(git -C "$WORK" rev-parse --short HEAD 2>/dev/null) ==="
+            df -h / | tail -1
+            free -h | head -2
+            echo "--- build log tail (last 60 lines) ---"
+            tail -n 60 "$LOG" 2>/dev/null
+        } > heartbeat.txt
+        git config user.name "fennec-ci"
+        git config user.email "fennec-ci@users.noreply.github.com"
+        git add heartbeat.txt
+        git commit -qm "heartbeat $(date -u +%H:%M:%S) run=${GITHUB_RUN_ID}" 2>>"$HBD"
+        # A concurrent run (or a late heartbeat) can make the push fail; that
+        # just drops one heartbeat, it must never affect the build.
+        if GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 timeout 120 \
+                git push -q -f origin ci-logs >>"$HBD" 2>&1; then
+            echo "heartbeat#$n $(date -u +%H:%M:%S) pushed OK" >> "$HBD"
+        else
+            echo "heartbeat#$n $(date -u +%H:%M:%S) PUSH FAILED rc=$?" >> "$HBD"
+        fi
+        # Fallback record in the workspace: if the push never works, the
+        # build-logs artifact still carries the last known state.
+        cp heartbeat.txt "$WORK/heartbeat_state.txt" 2>/dev/null || true
+        exit 0
+    ) 2>>"$HBD"
     rm -rf "$TMP"
     sleep 240
 done

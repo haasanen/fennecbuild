@@ -300,7 +300,7 @@ jobs:
           exit "$rc"
 
       - name: Upload build logs (diagnostics)
-        if: ${{ !cancelled() }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
@@ -310,6 +310,8 @@ jobs:
             build_llvm.log
             build_wasi.log
             build_full.log
+            ci_heartbeat_debug.log
+            heartbeat_state.txt
       - name: Locate unsigned APK
         id: apk
         run: |
