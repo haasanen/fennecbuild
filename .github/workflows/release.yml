@@ -36,6 +36,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    # ci_heartbeat.sh pushes its state file (and, on failure, the build-log
+    # tail) to the `ci-logs` branch using the job's GITHUB_TOKEN. Without this
+    # the token is read-only by default and every push is a silent 403 —
+    # which is why the branch never appeared after the 2026-09-21 runs.
+    permissions:
+      contents: write
     # One build at a time: parallel runs save to the same cache keys and clobber
     # each other (2026-09-20: two overlapping runs, both cache saves looked OK,
     # the next run's restores still missed). Extra pushes queue instead.
