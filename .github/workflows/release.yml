@@ -184,6 +184,11 @@ jobs:
           df -h /
           echo "=== srclib sizes ==="
           du -sh "$SIB"/srclib/*
+          # Absolute path to the srclib dir, for the cache steps below.
+          # actions/cache rejects '..' in `path` (and resolves relative paths
+          # against the workspace, which is why '../srclib/...' failed), so we
+          # hand it an absolute path instead.
+          echo "SRCLIB_DIR=$(cd "$SIB/srclib" && pwd)" >> "$GITHUB_ENV"
 
       - name: prebuild.sh (patches + configure)
         run: |
@@ -198,17 +203,15 @@ jobs:
         id: llvm-restore
         uses: actions/cache/restore@v4
         with:
-          path: srclib/llvm/out
+          path: ${{ env.SRCLIB_DIR }}/llvm/out
           key: fennec-llvm-out-3b5e7c83-v1
-        working-directory: ..
 
       - name: Restore WASI toolchain (if cached from a previous run)
         id: wasi-restore
         uses: actions/cache/restore@v4
         with:
-          path: srclib/wasi-sdk/build/install/wasi
+          path: ${{ env.SRCLIB_DIR }}/wasi-sdk/build/install/wasi
           key: fennec-wasi-out-v1
-        working-directory: ..
 
       - name: Phase 1/3 — LLVM toolchain (or restore from cache)
         run: |
@@ -249,9 +252,8 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
-          path: srclib/llvm/out
+          path: ${{ env.SRCLIB_DIR }}/llvm/out
           key: fennec-llvm-out-3b5e7c83-v1
-        working-directory: ..
 
       - name: Phase 2/3 — WASI SDK (or restore from cache)
         run: |
@@ -290,9 +292,8 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
-          path: srclib/wasi-sdk/build/install/wasi
+          path: ${{ env.SRCLIB_DIR }}/wasi-sdk/build/install/wasi
           key: fennec-wasi-out-v1
-        working-directory: ..
 
       - name: Phase 3/3 — GmsCore, Glean, Gecko, Fenix (the long tail)
         run: |
