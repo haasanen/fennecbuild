@@ -581,7 +581,10 @@ jobs:
   # master) — no extra secret required.
   p3-retry-nudge:
     needs: build
-    if: ${{ needs.build.result == 'cancelled' || needs.build.result == 'failure' }}
+    # NOTE: job-level if WITHOUT always() is silently skipped when the
+    # dependency fails (GitHub defaults to success() semantics) — verified
+    # empirically 2026-09-22 with a scratch workflow. always() is required.
+    if: ${{ always() && (needs.build.result == 'cancelled' || needs.build.result == 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
