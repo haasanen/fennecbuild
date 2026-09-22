@@ -295,18 +295,31 @@ jobs:
           path: ${{ env.SRCLIB_DIR }}/wasi-sdk/build/install/wasi
           key: fennec-wasi-out-v1
 
+      # ---- Phase 3: resumable stages --------------------------------------
+      # Phase 3 used to be ONE build-rest.sh step; when the shared
+      # ubuntu-latest runner was recycled mid-phase ("The runner has received a
+      # shutdown signal", exit 143) everything after the last cache was lost.
+      # It is now five sequential stages (same order as build-rest.sh, via
+      # STAGES= filtering), and EVERY completed stage uploads a checkpoint
+      # cache before the next stage starts. Keys carry run_id + run_attempt +
+      # stage because actions/cache refuses to overwrite an existing key on the
+      # same branch; restore-keys below picks up the most recent checkpoint of
+      # any previous run/attempt, so a re-run resumes from the last completed
+      # stage instead of restarting Phase 3 from zero (already-done stages
+      # re-execute as fast up-to-date no-ops against the restored
+      # obj/target/m2/gradle dirs).
       - name: Restore phase-3 caches (mavenLocal, gradle home, build dirs)
         uses: actions/cache/restore@v4
         with:
           path: |
             ~/.m2/repository
             ~/.gradle
-          key: fennec-p3-deps-v1
-          # Static key: every srclib is pinned to an exact commit/tag and the
-          # dependency set doesn't move with each fennecbuild push (our patches
-          # touch fenix/gecko config, not dep graphs). Bump the suffix when a
-          # srclib pin or a dependency version changes. Same convention as the
-          # toolchain caches.
+          # per-run seed key (never saved) + prefix restore of the newest
+          # checkpoint saved by any earlier run or attempt
+          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-seed
+          restore-keys: |
+            fennec-p3-deps-v1-
+            fennec-p3-deps-v1
 
       - name: Restore phase-3 build dirs (incremental compile)
         uses: actions/cache/restore@v4
@@ -314,84 +327,151 @@ jobs:
           path: |
             ${{ env.SRCLIB_DIR }}/MozFennec/obj
             ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-build-v1
           # Separate key (independent 10 GB budget): a build-dir save that
           # outgrows its limit must not poison the dependency cache. On a hit,
           # Phase 3 resumes incrementally (Gradle/Rust reuse valid artifacts).
+          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-seed
+          restore-keys: |
+            fennec-p3-build-v1-
+            fennec-p3-build-v1
 
-      - name: Phase 3/3 — GmsCore, Glean, Gecko, Fenix (the long tail)
-        id: phase3
+      - name: Touch restored build dirs (mtime-sensitive toolchains)
+        run: |
+          # Fresh-cloned sources are newer than cache-restored artifacts, and
+          # cargo/make decide freshness by mtime (gradle uses content hashes).
+          # Move the restored trees to 'now' so a resumed stage treats cached
+          # objects as up to date instead of rebuilding everything.
+          for d in "$SRCLIB_DIR/MozFennec/obj" "$SRCLIB_DIR/MozAppServices/target"; do
+            if [ -d "$d" ]; then
+              echo "touching $d"
+              find "$d" -exec touch {} + 2>/dev/null || true
+            fi
+          done
+
+      - name: Phase 3 heartbeat (one logger for all p3 stages)
         run: |
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
             >> "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/df_logger.pid"
           bash ci_heartbeat.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build_full.log" &
           echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
-          set -o pipefail
-          ./build-rest.sh 2>&1 | tee "$GITHUB_WORKSPACE/build_full.log"
-          rc=${PIPESTATUS[0]}
-          kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
-          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
-          echo "=== df (end) ==="; df -h /
-          exit "$rc"
 
-      - name: Measure cache sizes (mavenLocal, gradle, phase-3 build dirs)
-        id: measure
-        if: always()
-        run: |
-          # Sizes decide which caches to save. Measurement never fails the
-          # run — all guards fall through to "skip".
-          M2=~/.m2/repository
-          if [ -d "$M2" ]; then
-            b=$(du -sb "$M2" 2>/dev/null | awk '{print $1}'); b=${b:-0}
-            gb=$(awk -v b="$b" 'BEGIN{printf "%.2f", b/1073741824}')
-            echo "mavenLocal = ${gb} GB"
-          else
-            echo "no ~/.m2/repository yet"
-          fi
-          GH=~/.gradle
-          if [ -d "$GH" ]; then
-            b=$(du -sb "$GH" 2>/dev/null | awk '{print $1}'); b=${b:-0}
-            gb=$(awk -v b="$b" 'BEGIN{printf "%.2f", b/1073741824}')
-            echo "gradle home = ${gb} GB"
-          else
-            echo "no ~/.gradle yet"
-          fi
-          # combined build outputs (MozFennec obj + app-services target)
-          T=0
-          for d in "${SRCLIB_DIR:-../srclib}"/MozFennec/obj "${SRCLIB_DIR:-../srclib}"/MozAppServices/target; do
-            if [ -d "$d" ]; then b=$(du -sb "$d" 2>/dev/null | awk '{print $1}'); T=$((T + ${b:-0})); fi
-          done
-          tg=$(awk -v b="$T" 'BEGIN{printf "%.2f", b/1073741824}')
-          echo "build dirs (MozFennec obj + app-services target) = ${tg} GB"
-          if awk -v g="$tg" 'BEGIN{exit !(g < 9.0)}'; then
-            echo "cache-build-dirs=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build dirs >= 9.0 GB — excluding from the save (deps still cached)"
-            echo "cache-build-dirs=false" >> "$GITHUB_OUTPUT"
-          fi
-          df -h /
-          exit 0
+      - name: Phase 3a — microG libs + Glean (publishToMavenLocal)
+        id: p3a
+        run: bash run_p3_stage.sh "gmscore glean glean_as" p3a
 
-      - name: Save phase-3 dependency cache (mavenLocal + gradle home)
-        if: ${{ always() && steps.phase3.outcome == 'success' }}
+      - name: P3a checkpoint — deps
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
             ~/.m2/repository
             ~/.gradle
-          key: fennec-p3-deps-v1
+          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-a
 
-      - name: Save phase-3 build dirs (incremental compile cache)
-        if: ${{ always() && steps.phase3.outcome == 'success' && steps.measure.outcome == 'success' && steps.measure.outputs.cache-build-dirs == 'true' }}
+      - name: Phase 3b — Gecko (mach build + package + geckoview)
+        id: p3b
+        run: bash run_p3_stage.sh "gecko" p3b
+
+      - name: P3b checkpoint guard (build dirs < 9 GB)
+        id: ck-b
+        continue-on-error: true
+        run: bash ci_p3_guard.sh
+
+      - name: P3b checkpoint — deps
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle
+          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-b
+
+      - name: P3b checkpoint — build dirs
+        if: steps.ck-b.conclusion == 'success'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ env.SRCLIB_DIR }}/MozFennec/obj
             ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-build-v1
+          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-b
+
+      - name: Phase 3c — AppServices (concept-fetch shim, NSS, nimbus-fml)
+        id: p3c
+        run: bash run_p3_stage.sh "ac_fetch150 appservices" p3c
+
+      - name: P3c checkpoint guard (build dirs < 9 GB)
+        id: ck-c
+        continue-on-error: true
+        run: bash ci_p3_guard.sh
+
+      - name: P3c checkpoint — deps
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle
+          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-c
+
+      - name: P3c checkpoint — build dirs
+        if: steps.ck-c.conclusion == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.SRCLIB_DIR }}/MozFennec/obj
+            ${{ env.SRCLIB_DIR }}/MozAppServices/target
+          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-c
+
+      - name: Phase 3d — UnifiedPush + Android Components
+        id: p3d
+        run: bash run_p3_stage.sh "upush ac" p3d
+
+      - name: P3d checkpoint — deps
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle
+          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-d
+
+      - name: Phase 3e — Fenix assembleRelease
+        id: p3e
+        run: bash run_p3_stage.sh "fenix" p3e
+
+      - name: P3e checkpoint guard (build dirs < 9 GB)
+        id: ck-e
+        continue-on-error: true
+        run: bash ci_p3_guard.sh
+
+      - name: P3e checkpoint — deps
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle
+          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-e
+
+      - name: P3e checkpoint — build dirs
+        if: steps.ck-e.conclusion == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.SRCLIB_DIR }}/MozFennec/obj
+            ${{ env.SRCLIB_DIR }}/MozAppServices/target
+          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-e
+
+      - name: Stop Phase 3 heartbeat
+        if: always()
+        run: |
+          kill "$(cat "$GITHUB_WORKSPACE/df_logger.pid")" 2>/dev/null || true
+          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
+          echo "=== df (end) ==="; df -h /
 
       - name: Upload build logs (diagnostics)
         if: always()
@@ -404,6 +484,11 @@ jobs:
             build_llvm.log
             build_wasi.log
             build_full.log
+            build_p3a.log
+            build_p3b.log
+            build_p3c.log
+            build_p3d.log
+            build_p3e.log
             ci_heartbeat_debug.log
             heartbeat_state.txt
       - name: Locate unsigned APK
@@ -484,3 +569,39 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/haasanen/fdroid-repo/actions/workflows/update.yml/dispatches \
             -d '{"ref":"main"}' || true
+
+  # Automatic resume after a shared-runner recycle. A job killed by a runner
+  # shutdown signal cannot run any recovery step itself (the whole VM is gone),
+  # so this separate tiny job fires instead and pushes an EMPTY nudge commit;
+  # the push re-triggers this workflow, which then restores the newest p3
+  # checkpoint caches and resumes. Genuinely-failed builds are re-attempted at
+  # most twice (cheap: everything still cached is restored). The counter walks
+  # commits from HEAD and resets to 0 as soon as any non-nudge commit lands.
+  # Uses the built-in GITHUB_TOKEN (public repo, no branch protection on
+  # master) — no extra secret required.
+  p3-retry-nudge:
+    needs: build
+    if: ${{ needs.build.result == 'cancelled' || needs.build.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: fennec-nudge
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+          fetch-depth: 30
+
+      - name: Nudge push (resumes the build from the last checkpoint)
+        run: |
+          set -e
+          n=$(git log --format=%s | awk '/p3-retry/{c++; next} {exit} END{print c+0}')
+          if [ "$n" -ge 2 ]; then
+            echo "already nudged $n times at HEAD — stopping (manual inspection needed)"
+            exit 0
+          fi
+          git config user.name fennec-ci
+          git config user.email fennec-ci@users.noreply.github.com
+          git commit --allow-empty -m "ci: resume phase-3 after runner shutdown [p3-retry $((n+1))]"
+          git push
