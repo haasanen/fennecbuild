@@ -295,7 +295,32 @@ jobs:
           path: ${{ env.SRCLIB_DIR }}/wasi-sdk/build/install/wasi
           key: fennec-wasi-out-v1
 
+      - name: Restore phase-3 caches (mavenLocal, gradle home, build dirs)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle
+          key: fennec-p3-deps-v1
+          # Static key: every srclib is pinned to an exact commit/tag and the
+          # dependency set doesn't move with each fennecbuild push (our patches
+          # touch fenix/gecko config, not dep graphs). Bump the suffix when a
+          # srclib pin or a dependency version changes. Same convention as the
+          # toolchain caches.
+
+      - name: Restore phase-3 build dirs (incremental compile)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.SRCLIB_DIR }}/MozFennec/obj
+            ${{ env.SRCLIB_DIR }}/MozAppServices/target
+          key: fennec-p3-build-v1
+          # Separate key (independent 10 GB budget): a build-dir save that
+          # outgrows its limit must not poison the dependency cache. On a hit,
+          # Phase 3 resumes incrementally (Gradle/Rust reuse valid artifacts).
+
       - name: Phase 3/3 — GmsCore, Glean, Gecko, Fenix (the long tail)
+        id: phase3
         run: |
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
             >> "$GITHUB_WORKSPACE/df_history.log" 2>&1 &
@@ -309,6 +334,64 @@ jobs:
           kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (end) ==="; df -h /
           exit "$rc"
+
+      - name: Measure cache sizes (mavenLocal, gradle, phase-3 build dirs)
+        id: measure
+        if: always()
+        run: |
+          # Sizes decide which caches to save. Measurement never fails the
+          # run — all guards fall through to "skip".
+          M2=~/.m2/repository
+          if [ -d "$M2" ]; then
+            b=$(du -sb "$M2" 2>/dev/null | awk '{print $1}'); b=${b:-0}
+            gb=$(awk -v b="$b" 'BEGIN{printf "%.2f", b/1073741824}')
+            echo "mavenLocal = ${gb} GB"
+          else
+            echo "no ~/.m2/repository yet"
+          fi
+          GH=~/.gradle
+          if [ -d "$GH" ]; then
+            b=$(du -sb "$GH" 2>/dev/null | awk '{print $1}'); b=${b:-0}
+            gb=$(awk -v b="$b" 'BEGIN{printf "%.2f", b/1073741824}')
+            echo "gradle home = ${gb} GB"
+          else
+            echo "no ~/.gradle yet"
+          fi
+          # combined build outputs (MozFennec obj + app-services target)
+          T=0
+          for d in "${SRCLIB_DIR:-../srclib}"/MozFennec/obj "${SRCLIB_DIR:-../srclib}"/MozAppServices/target; do
+            if [ -d "$d" ]; then b=$(du -sb "$d" 2>/dev/null | awk '{print $1}'); T=$((T + ${b:-0})); fi
+          done
+          tg=$(awk -v b="$T" 'BEGIN{printf "%.2f", b/1073741824}')
+          echo "build dirs (MozFennec obj + app-services target) = ${tg} GB"
+          if awk -v g="$tg" 'BEGIN{exit !(g < 9.0)}'; then
+            echo "cache-build-dirs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build dirs >= 9.0 GB — excluding from the save (deps still cached)"
+            echo "cache-build-dirs=false" >> "$GITHUB_OUTPUT"
+          fi
+          df -h /
+          exit 0
+
+      - name: Save phase-3 dependency cache (mavenLocal + gradle home)
+        if: ${{ always() && steps.phase3.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle
+          key: fennec-p3-deps-v1
+
+      - name: Save phase-3 build dirs (incremental compile cache)
+        if: ${{ always() && steps.phase3.outcome == 'success' && steps.measure.outcome == 'success' && steps.measure.outputs.cache-build-dirs == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.SRCLIB_DIR }}/MozFennec/obj
+            ${{ env.SRCLIB_DIR }}/MozAppServices/target
+          key: fennec-p3-build-v1
 
       - name: Upload build logs (diagnostics)
         if: always()
