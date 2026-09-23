@@ -199,7 +199,11 @@ while [ "$off" -lt "$total" ]; do
         log "FAIL: chunk $idx unreachable"; rm -rf "$STAGEDIR"; exit 20
     fi
     rm -f "$STAGEDIR/chunk.$idx"
-    off=$((off + sz)); i=$((i + 1)); idx=$((idx + 1))
+    # dd cursor advances by the chunk's MiB BLOCK count, not by 1: the file is
+    # read at bs=1M, so chunk k must start at file offset k*CHUNK_MB MiB blocks,
+    # not k MiB. Advancing by 1 misaligns every chunk past #0 (run #28: zero
+    # segment caches — the reassembled archive was corrupt/oversent).
+    off=$((off + sz)); i=$((i + (sz + 1048575) / 1048576)); idx=$((idx + 1))
 done
 
 CJSON="$STAGEDIR/commit.json"

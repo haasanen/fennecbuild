@@ -357,6 +357,10 @@ jobs:
         # MUST list EXACTLY the same path string as the segment saves: the
         # cache 'version' hash is sha256(paths|method|salt) of these literals.
         # Runs AFTER the generic build-dirs restore and lays on top of it.
+        # continue-on-error: a corrupt/oversize cached checkpoint must never
+        # hard-kill the job pre-P3a — a bad restore just means the segment
+        # loop starts fresh from the (older) build-dirs restore underneath.
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -560,6 +564,7 @@ jobs:
             build_p3e.log
             ci_heartbeat_debug.log
             heartbeat_state.txt
+            midstage_saver.log
       - name: Locate unsigned APK
         id: apk
         run: |
