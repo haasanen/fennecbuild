@@ -60,13 +60,13 @@ jobs:
         run: |
           echo "upstream: $UP_TITLE id=$UP_ID attempt=$UP_ATTEMPT conclusion=$UP_CONCLUSION sha=$UP_HEAD_SHA"
 
-      - name: Rerun failed jobs with attempt cap 3
+      - name: Rerun failed jobs with attempt cap 10
         env:
           UP_ID: ${{ github.event.workflow_run.id }}
           UP_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
           set -e
-          if [ "$UP_ATTEMPT" -ge 3 ]; then
+          if [ "$UP_ATTEMPT" -ge 10 ]; then
             echo "CAP REACHED: run $UP_ID already attempted $UP_ATTEMPT times — not rerunning (manual inspection needed)"
             exit 0
           fi
