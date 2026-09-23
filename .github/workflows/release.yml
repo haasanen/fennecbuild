@@ -585,6 +585,11 @@ jobs:
     # dependency fails (GitHub defaults to success() semantics) — verified
     # empirically 2026-09-22 with a scratch workflow. always() is required.
     if: ${{ always() && (needs.build.result == 'cancelled' || needs.build.result == 'failure') }}
+    # The nudge commits AND pushes to master, so its GITHUB_TOKEN needs
+    # contents: write (job token defaults to read otherwise — run #25's push
+    # 403'd exactly on this).
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
