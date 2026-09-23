@@ -42,9 +42,6 @@
 #   DRY_RUN=1           build the archive, log the exact API calls, POST nothing
 # Exit codes: 0 saved | 10 benign skip (env absent / too big / key exists)
 #             20 real failure. NEVER a mystery: every path logs to the log.
-#
-# Copyright (C) 2026 fennecbuild contributors — same AGPLv3 terms as the
-# other CI scripts in this repo.
 set -u -o pipefail
 
 WS="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
