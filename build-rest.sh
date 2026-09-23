@@ -21,11 +21,19 @@
 # build-llvm.sh / build-wasi.sh.
 #
 # STAGES: whitespace-separated subset of
-#   gmscore glean glean_as gecko ac_fetch150 appservices upush ac fenix
+#   gmscore glean glean_as gecko gecko_build gecko_package gecko_gv
+#   ac_fetch150 appservices upush ac fenix
 # selects which blocks run (CI runs one slice per step so a shared-runner
 # recycle can be survived: each completed slice checkpoints its caches, and
 # the retry re-runs earlier slices as up-to-date no-ops). Unset STAGES runs
 # everything — the local / F-Droid path is unchanged.
+# 'gecko' still runs all three gecko sub-stages (so the local path and any
+# STAGES='gecko' caller are unchanged); CI uses the sub-stages to checkpoint
+# between them — a runner reclaimed mid-gecko then resumes at the next
+# sub-stage (or, for gecko_build's time-boxed segments, at the last
+# mach-build checkpoint). Sub-stages assume their predecessors completed —
+# their state arrives via the checkpoint caches restored at job start:
+# gecko_package needs mach build's obj/, gecko_gv needs the packaged gecko.
 set -e
 source "$(dirname "$0")/paths.sh"
 
@@ -67,12 +75,25 @@ gradle publishToMavenLocal
 popd
 fi
 
-if run_stage gecko; then
+if run_stage gecko || run_stage gecko_build; then
 pushd "$mozilla_release"
 ./mach build
+popd
+fi
+
+if run_stage gecko || run_stage gecko_package; then
+pushd "$mozilla_release"
 ./mach package
 read -ra locales < "$patches/locales"
 ./mach package-multi-locale --locales "${locales[@]}"
+popd
+fi
+
+if run_stage gecko || run_stage gecko_gv; then
+pushd "$mozilla_release"
+# locales list re-read so this sub-stage is runnable on its own (same file
+# the gecko_package sub-stage consumed).
+read -ra locales < "$patches/locales"
 MOZ_CHROME_MULTILOCALE=${locales[*]}
 export MOZ_CHROME_MULTILOCALE
 gradle -x javadocRelease :geckoview:publishReleasePublicationToMavenLocal
