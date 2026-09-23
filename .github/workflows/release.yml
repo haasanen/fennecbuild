@@ -348,6 +348,22 @@ jobs:
             fi
           done
 
+      - name: P3b1 restore latest mach-build segment
+        # Newest time-boxed `mach build` checkpoint of ANY previous run or
+        # attempt (actions/cache returns the most-recently-created cache
+        # matching a restore-key prefix — documented restore semantics).
+        # Saved by the segment loop below via midstage_cache_saver.sh (same
+        # wire format as actions/cache/save, so this restores it unchanged).
+        # MUST list EXACTLY the same path string as the segment saves: the
+        # cache 'version' hash is sha256(paths|method|salt) of these literals.
+        # Runs AFTER the generic build-dirs restore and lays on top of it.
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seed
+          restore-keys: |
+            fennec-p3b1-seg-v1-
+
       - name: Phase 3 heartbeat (one logger for all p3 stages)
         run: |
           ( while true; do echo "=== $(date -u +%H:%M:%S) ==="; df -h / | tail -1; free -h | head -2; sleep 240; done ) \
@@ -369,9 +385,62 @@ jobs:
             ~/.gradle
           key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-a
 
-      - name: Phase 3b — Gecko (mach build + package + geckoview)
-        id: p3b
-        run: bash run_p3_stage.sh "gecko" p3b
+      # ---- P3b split: build / package / geckoview --------------------------
+      # The old single P3b step ran `mach build && mach package &&
+      # package-multi-locale && :geckoview:publish` (hours). Shared runners
+      # get reclaimed ~10-30 min in (run #25: SIGTERM at mach clock 11:02),
+      # and a reclaimed step saved NOTHING — the next attempt recompiled
+      # from zero. P3b is now three boundary-checkpointed sub-stages
+      # (build-rest.sh STAGES gecko_build / gecko_package / gecko_gv), and
+      # gecko_build additionally runs as a LOOP of ~10-min time-boxed
+      # segments (run_p3_segment.sh) that each end with an in-step obj/
+      # checkpoint via midstage_cache_saver.sh, so even a hard reclaim
+      # between segments loses at most one segment's work — and normally the
+      # deadline fires BEFORE the host's reclaim, on our own terms, with the
+      # checkpoint already uploaded.
+      - name: Phase 3b1 — Gecko mach build (time-boxed segments)
+        id: p3b1
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window so
+                                 # our deadline fires first (runs reclaimed at
+                                 # ~13-15 min — leave room for the obj/ save)
+          SEGMENT_MAX: "24"      # safety cap on segments (24*10min = 4 h)
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          for seg in $(seq 1 "${SEGMENT_MAX}"); do
+            echo "===== P3b1 segment $seg (budget ${SEGMENT_SECS}s) ====="
+            df -h / | tail -1
+            # obj/ restored fresh or checkpointed: make everything look newer
+            # than the sources so mach/ninja treat it as up to date.
+            if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+            rc=0
+            bash run_p3_segment.sh "gecko_build" "p3b1-s${seg}" "$SEGMENT_SECS" || rc=$?
+            if [ "$rc" = "0" ]; then echo "P3b1: mach build complete in segment $seg"; break; fi
+            if [ "$rc" != "124" ]; then echo "P3b1: real build failure rc=$rc"; exit "$rc"; fi
+            echo "P3b1 segment $seg: deadline hit — checkpointing obj/"
+            bash midstage_cache_saver.sh "fennec-p3b1-seg-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%d%H%M%S)-$$" "$OBJ" || true
+            tail -3 "$GITHUB_WORKSPACE/midstage_saver.log" 2>/dev/null || true
+          done
+          if [ "$rc" != "0" ]; then echo "P3b1: segment cap reached without completion"; exit 1; fi
+
+      - name: P3b1 checkpoint — build dirs (mach build done)
+        if: steps.p3b1.conclusion == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.SRCLIB_DIR }}/MozFennec/obj
+            ${{ env.SRCLIB_DIR }}/MozAppServices/target
+          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-b1
+
+      - name: Phase 3b2 — Gecko package + package-multi-locale
+        id: p3b2
+        run: bash run_p3_stage.sh "gecko_package" p3b2
+
+      - name: Phase 3b3 — GeckoView publishToMavenLocal
+        id: p3b3
+        run: bash run_p3_stage.sh "gecko_gv" p3b3
 
       - name: P3b checkpoint guard (build dirs < 9 GB)
         id: ck-b
