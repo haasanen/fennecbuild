@@ -391,45 +391,949 @@ jobs:
 
       # ---- P3b split: build / package / geckoview --------------------------
       # The old single P3b step ran `mach build && mach package &&
-      # package-multi-locale && :geckoview:publish` (hours). Shared runners
+      # package-multi-locale + :geckoview:publish` (hours). Shared runners
       # get reclaimed ~10-30 min in (run #25: SIGTERM at mach clock 11:02),
       # and a reclaimed step saved NOTHING — the next attempt recompiled
       # from zero. P3b is now three boundary-checkpointed sub-stages
       # (build-rest.sh STAGES gecko_build / gecko_package / gecko_gv), and
-      # gecko_build additionally runs as a LOOP of ~10-min time-boxed
-      # segments (run_p3_segment.sh) that each end with an in-step obj/
-      # checkpoint via midstage_cache_saver.sh, so even a hard reclaim
-      # between segments loses at most one segment's work — and normally the
-      # deadline fires BEFORE the host's reclaim, on our own terms, with the
-      # checkpoint already uploaded.
-      - name: Phase 3b1 — Gecko mach build (time-boxed segments)
-        id: p3b1
+      # gecko_build runs as a STATIC expansion of 24 time-boxed segment
+      # steps (run_p3_segment.sh, 10-min budget each) followed by a step
+      # boundary actions/cache/save@v4 checkpoint of obj/. Once mach build
+      # completes (rc=0 -> done=true) every remaining segment+save step
+      # short-circuits via its `if:` and the build continues at P3b2.
+      #
+      # WHY step-boundary saves and not the in-step saver (run #29 lesson):
+      # 2026 hosted runners ("Hosted Compute Agent", runner 2.337.0) expose
+      # NO cache-service env to bash steps — ACTIONS_CACHE_URL,
+      # ACTIONS_RESULTS_URL, ACTIONS_RUNTIME_TOKEN are all UNSET (probe run
+      # 35944549562, 2026-09-24) — so midstage_cache_saver.sh SKIPs on its
+      # env preflight. actions/cache@v4 still works at step boundaries
+      # (deps caches land), so checkpoints must live where v4 can run.
+      # Losing a segment to a mid-step reclaim costs at most its 10 min.
+      #
+      # NOTE: the `path:` in every save step MUST stay byte-identical to the
+      # `P3b1 restore latest mach-build segment` restore step above — the
+      # cache 'version' hash is computed over the literal path string.
+      - name: "P3b1 seg 1 — mach build (10-min budget)"
+        id: seg1
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window so
-                                 # our deadline fires first (runs reclaimed at
-                                 # ~13-15 min — leave room for the obj/ save)
-          SEGMENT_MAX: "24"      # safety cap on segments (24*10min = 4 h)
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
           OBJ="$SRCLIB_DIR/MozFennec/obj"
-          for seg in $(seq 1 "${SEGMENT_MAX}"); do
-            echo "===== P3b1 segment $seg (budget ${SEGMENT_SECS}s) ====="
-            df -h / | tail -1
-            # obj/ restored fresh or checkpointed: make everything look newer
-            # than the sources so mach/ninja treat it as up to date.
-            if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
-            rc=0
-            bash run_p3_segment.sh "gecko_build" "p3b1-s${seg}" "$SEGMENT_SECS" || rc=$?
-            if [ "$rc" = "0" ]; then echo "P3b1: mach build complete in segment $seg"; break; fi
-            if [ "$rc" != "124" ]; then echo "P3b1: real build failure rc=$rc"; exit "$rc"; fi
-            echo "P3b1 segment $seg: deadline hit — checkpointing obj/"
-            bash midstage_cache_saver.sh "fennec-p3b1-seg-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%d%H%M%S)-$$" "$OBJ" || true
-            tail -3 "$GITHUB_WORKSPACE/midstage_saver.log" 2>/dev/null || true
-          done
-          if [ "$rc" != "0" ]; then echo "P3b1: segment cap reached without completion"; exit 1; fi
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s1" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 1"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 1 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 1 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg1.conclusion == 'success' && steps.seg1.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg1
+
+      - name: "P3b1 seg 2 — mach build (10-min budget)"
+        id: seg2
+        if: ${{ steps.seg1.conclusion == 'success' && steps.seg1.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s2" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 2"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 2 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 2 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg2.conclusion == 'success' && steps.seg2.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg2
+
+      - name: "P3b1 seg 3 — mach build (10-min budget)"
+        id: seg3
+        if: ${{ steps.seg2.conclusion == 'success' && steps.seg2.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s3" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 3"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 3 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 3 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg3.conclusion == 'success' && steps.seg3.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg3
+
+      - name: "P3b1 seg 4 — mach build (10-min budget)"
+        id: seg4
+        if: ${{ steps.seg3.conclusion == 'success' && steps.seg3.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s4" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 4"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 4 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 4 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg4.conclusion == 'success' && steps.seg4.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg4
+
+      - name: "P3b1 seg 5 — mach build (10-min budget)"
+        id: seg5
+        if: ${{ steps.seg4.conclusion == 'success' && steps.seg4.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s5" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 5"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 5 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 5 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg5.conclusion == 'success' && steps.seg5.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg5
+
+      - name: "P3b1 seg 6 — mach build (10-min budget)"
+        id: seg6
+        if: ${{ steps.seg5.conclusion == 'success' && steps.seg5.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s6" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 6"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 6 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 6 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg6.conclusion == 'success' && steps.seg6.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg6
+
+      - name: "P3b1 seg 7 — mach build (10-min budget)"
+        id: seg7
+        if: ${{ steps.seg6.conclusion == 'success' && steps.seg6.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s7" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 7"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 7 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 7 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg7.conclusion == 'success' && steps.seg7.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg7
+
+      - name: "P3b1 seg 8 — mach build (10-min budget)"
+        id: seg8
+        if: ${{ steps.seg7.conclusion == 'success' && steps.seg7.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s8" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 8"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 8 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 8 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg8.conclusion == 'success' && steps.seg8.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg8
+
+      - name: "P3b1 seg 9 — mach build (10-min budget)"
+        id: seg9
+        if: ${{ steps.seg8.conclusion == 'success' && steps.seg8.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s9" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 9"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 9 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 9 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg9.conclusion == 'success' && steps.seg9.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg9
+
+      - name: "P3b1 seg 10 — mach build (10-min budget)"
+        id: seg10
+        if: ${{ steps.seg9.conclusion == 'success' && steps.seg9.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s10" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 10"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 10 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 10 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg10.conclusion == 'success' && steps.seg10.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg10
+
+      - name: "P3b1 seg 11 — mach build (10-min budget)"
+        id: seg11
+        if: ${{ steps.seg10.conclusion == 'success' && steps.seg10.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s11" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 11"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 11 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 11 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg11.conclusion == 'success' && steps.seg11.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg11
+
+      - name: "P3b1 seg 12 — mach build (10-min budget)"
+        id: seg12
+        if: ${{ steps.seg11.conclusion == 'success' && steps.seg11.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s12" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 12"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 12 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 12 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg12.conclusion == 'success' && steps.seg12.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg12
+
+      - name: "P3b1 seg 13 — mach build (10-min budget)"
+        id: seg13
+        if: ${{ steps.seg12.conclusion == 'success' && steps.seg12.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s13" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 13"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 13 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 13 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg13.conclusion == 'success' && steps.seg13.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg13
+
+      - name: "P3b1 seg 14 — mach build (10-min budget)"
+        id: seg14
+        if: ${{ steps.seg13.conclusion == 'success' && steps.seg13.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s14" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 14"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 14 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 14 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg14.conclusion == 'success' && steps.seg14.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg14
+
+      - name: "P3b1 seg 15 — mach build (10-min budget)"
+        id: seg15
+        if: ${{ steps.seg14.conclusion == 'success' && steps.seg14.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s15" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 15"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 15 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 15 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg15.conclusion == 'success' && steps.seg15.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg15
+
+      - name: "P3b1 seg 16 — mach build (10-min budget)"
+        id: seg16
+        if: ${{ steps.seg15.conclusion == 'success' && steps.seg15.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s16" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 16"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 16 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 16 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg16.conclusion == 'success' && steps.seg16.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg16
+
+      - name: "P3b1 seg 17 — mach build (10-min budget)"
+        id: seg17
+        if: ${{ steps.seg16.conclusion == 'success' && steps.seg16.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s17" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 17"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 17 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 17 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg17.conclusion == 'success' && steps.seg17.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg17
+
+      - name: "P3b1 seg 18 — mach build (10-min budget)"
+        id: seg18
+        if: ${{ steps.seg17.conclusion == 'success' && steps.seg17.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s18" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 18"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 18 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 18 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg18.conclusion == 'success' && steps.seg18.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg18
+
+      - name: "P3b1 seg 19 — mach build (10-min budget)"
+        id: seg19
+        if: ${{ steps.seg18.conclusion == 'success' && steps.seg18.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s19" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 19"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 19 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 19 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg19.conclusion == 'success' && steps.seg19.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg19
+
+      - name: "P3b1 seg 20 — mach build (10-min budget)"
+        id: seg20
+        if: ${{ steps.seg19.conclusion == 'success' && steps.seg19.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s20" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 20"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 20 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 20 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg20.conclusion == 'success' && steps.seg20.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg20
+
+      - name: "P3b1 seg 21 — mach build (10-min budget)"
+        id: seg21
+        if: ${{ steps.seg20.conclusion == 'success' && steps.seg20.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s21" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 21"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 21 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 21 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg21.conclusion == 'success' && steps.seg21.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg21
+
+      - name: "P3b1 seg 22 — mach build (10-min budget)"
+        id: seg22
+        if: ${{ steps.seg21.conclusion == 'success' && steps.seg21.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s22" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 22"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 22 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 22 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg22.conclusion == 'success' && steps.seg22.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg22
+
+      - name: "P3b1 seg 23 — mach build (10-min budget)"
+        id: seg23
+        if: ${{ steps.seg22.conclusion == 'success' && steps.seg22.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s23" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 23"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 23 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 23 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg23.conclusion == 'success' && steps.seg23.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg23
+
+      - name: "P3b1 seg 24 — mach build (10-min budget)"
+        id: seg24
+        if: ${{ steps.seg23.conclusion == 'success' && steps.seg23.outputs.done == 'false' }}
+        env:
+          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+        run: |
+          set -u
+          OBJ="$SRCLIB_DIR/MozFennec/obj"
+          # obj/ restored from a segment checkpoint or still warm: keep mtimes
+          # >= sources so mach/ninja treat it as up to date.
+          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
+          rc=0
+          bash run_p3_segment.sh "gecko_build" "p3b1-s24" "${SEGMENT_SECS}" || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "P3b1: mach build complete in segment 24"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" = "124" ]; then
+            echo "P3b1: segment 24 deadline hit — obj checkpoint follows"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "P3b1: real build failure rc=$rc"
+            exit "$rc"
+          fi
+
+      - name: "P3b1 seg 24 — save obj checkpoint (v4)"
+        # Step-boundary save: 2026 runners expose NO cache-service env to
+        # bash steps (probe 2026-09-24), so in-step saving is impossible;
+        # actions/cache@v4 at a step boundary is the only working channel.
+        # Path MUST match the restore step above exactly (version-hash parity).
+        # continue-on-error: a failed/oversize save must not kill a healthy
+        # build — the next segment simply re-does that 10 min.
+        if: ${{ steps.seg24.conclusion == 'success' && steps.seg24.outputs.done == 'false' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
+          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seg24
+
+      - name: "P3b1 cap check (mach build incomplete after 24 segments)"
+        if: ${{ !(steps.seg1.outputs.done == 'true' || steps.seg2.outputs.done == 'true' || steps.seg3.outputs.done == 'true' || steps.seg4.outputs.done == 'true' || steps.seg5.outputs.done == 'true' || steps.seg6.outputs.done == 'true' || steps.seg7.outputs.done == 'true' || steps.seg8.outputs.done == 'true' || steps.seg9.outputs.done == 'true' || steps.seg10.outputs.done == 'true' || steps.seg11.outputs.done == 'true' || steps.seg12.outputs.done == 'true' || steps.seg13.outputs.done == 'true' || steps.seg14.outputs.done == 'true' || steps.seg15.outputs.done == 'true' || steps.seg16.outputs.done == 'true' || steps.seg17.outputs.done == 'true' || steps.seg18.outputs.done == 'true' || steps.seg19.outputs.done == 'true' || steps.seg20.outputs.done == 'true' || steps.seg21.outputs.done == 'true' || steps.seg22.outputs.done == 'true' || steps.seg23.outputs.done == 'true' || steps.seg24.outputs.done == 'true') }}
+        run: |
+          echo "P3b1: 24 segments (10 min each) exhausted without completion"
+          exit 1
+
 
       - name: P3b1 checkpoint — build dirs (mach build done)
-        if: steps.p3b1.conclusion == 'success'
+        if: ${{ steps.seg1.outputs.done == 'true' || steps.seg2.outputs.done == 'true' || steps.seg3.outputs.done == 'true' || steps.seg4.outputs.done == 'true' || steps.seg5.outputs.done == 'true' || steps.seg6.outputs.done == 'true' || steps.seg7.outputs.done == 'true' || steps.seg8.outputs.done == 'true' || steps.seg9.outputs.done == 'true' || steps.seg10.outputs.done == 'true' || steps.seg11.outputs.done == 'true' || steps.seg12.outputs.done == 'true' || steps.seg13.outputs.done == 'true' || steps.seg14.outputs.done == 'true' || steps.seg15.outputs.done == 'true' || steps.seg16.outputs.done == 'true' || steps.seg17.outputs.done == 'true' || steps.seg18.outputs.done == 'true' || steps.seg19.outputs.done == 'true' || steps.seg20.outputs.done == 'true' || steps.seg21.outputs.done == 'true' || steps.seg22.outputs.done == 'true' || steps.seg23.outputs.done == 'true' || steps.seg24.outputs.done == 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
