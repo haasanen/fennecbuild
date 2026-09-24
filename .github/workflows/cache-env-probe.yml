@@ -1,0 +1,76 @@
+name: CacheEnvProbe
+
+# Lightweight READ-ONLY diagnostic of the cache-service env a PLAIN BASH step
+# receives on ubuntu-latest (Sept 2026) — i.e. the exact context where
+# midstage_cache_saver.sh SKIPs. This answers: which of
+#   ACTIONS_CACHE_URL / ACTIONS_RESULTS_URL / ACTIONS_RUNTIME_TOKEN /
+#   ACTIONS_ID_TOKEN_REQUEST_TOKEN / ACTIONS_CACHE_SERVICE_V2
+# are actually set, and do the v1-REST / v2-twirp endpoints respond?
+#
+# PRESENCE FLAGS ONLY — no secret values are printed. NO cache writes: only a
+# read list/lookup query, no reservation, nothing finalized. Never fails the
+# run (everything || true, exit 0) so the log is always readable.
+#
+# Trigger: push to the `probe-env` branch (the repo PAT can push but 403s on
+# workflow_dispatch). A push to this side branch CANNOT trigger a Release build
+# (Release only fires on push: master) and CANNOT touch a running build
+# (separate workflow, no shared concurrency group).
+
+on:
+  push:
+    branches: [probe-env]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: cache-env diagnostic (read-only)
+        run: |
+          set -u
+          echo "===== [cache-probe] $(date -u +%H:%M:%S) env presence (values redacted) ====="
+          for v in ACTIONS_CACHE_URL ACTIONS_RESULTS_URL ACTIONS_RUNTIME_TOKEN \
+                   ACTIONS_ARTIFACTS_URL ACTIONS_ID_TOKEN_REQUEST_URL \
+                   ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_CACHE_SERVICE_V2 \
+                   RUNNER_TEMP GITHUB_WORKSPACE; do
+            if [ -n "${!v+x}" ]; then
+              val="${!v}"
+              if [ "$v" = "ACTIONS_CACHE_URL" ] || [ "$v" = "ACTIONS_RESULTS_URL" ] || [ "$v" = "ACTIONS_ARTIFACTS_URL" ]; then
+                host=$(printf '%s' "$val" | sed -E 's#(https?://[^/]+).*#\1#')
+                echo "  $v = SET  host=$host  len=${#val}"
+              else
+                echo "  $v = SET  len=${#val}"
+              fi
+            else
+              echo "  $v = UNSET"
+            fi
+          done
+          echo "  --- env NAMES matching ACTIONS|CACHE|RUNTIME|TOKEN (names only) ---"
+          env | cut -d= -f1 | grep -iE "ACTIONS|CACHE|RUNTIME|TOKEN" | sed 's/^/    /' || true
+          BASE="${ACTIONS_CACHE_URL:-${ACTIONS_RESULTS_URL:-}}"
+          TOK="${ACTIONS_RUNTIME_TOKEN:-}"
+          if [ -n "$BASE" ] && [ -n "$TOK" ]; then
+            code=$(curl -s -o /tmp/cprobe.txt -w "%{http_code}" \
+              -H "Authorization: Bearer ***" \
+              -H "Accept: application/json;api-version=6.0-preview.1" \
+              "${BASE%/}/_apis/artifactcache/caches?api-version=6.0-preview.1&\$top=2" || echo 000)
+            echo "  [cache-probe] v1 REST list -> HTTP $code"
+            head -c 300 /tmp/cprobe.txt 2>/dev/null | sed -E 's|"value":"[^"]*"|"value":"<redacted>"|g'; echo
+          else
+            echo "  [cache-probe] SKIP v1 live check: BASE=${BASE:+SET}${BASE:-<unset>} TOK=${TOK:+SET}${TOK:-<unset>}"
+          fi
+          if [ -n "${ACTIONS_RESULTS_URL:-}" ] && [ -n "$TOK" ]; then
+            vc=$(curl -s -o /tmp/cprobe2.txt -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer ***" -H "Content-Type: application/json" \
+              -d '{"key":"__probe__","restoreKeys":[],"version":"0000000000000000000000000000000000000000000000000000000000000000"}' \
+              "${ACTIONS_RESULTS_URL%/}/twirp/github.actions.results.api.v1.CacheService/GetCacheEntryDownloadURL" || echo 000)
+            echo "  [cache-probe] v2 twirp GetCacheEntryDownloadURL -> HTTP $vc"
+            head -c 300 /tmp/cprobe2.txt 2>/dev/null | sed -E 's#https?://[^" ]+#<url-redacted>#g'; echo
+          else
+            echo "  [cache-probe] SKIP v2 live check (RESULTS_URL or TOK unset)"
+          fi
+          echo "===== [cache-probe] end ====="
+        shell: bash
+        # Never fail the run — the whole point is a readable diagnostic log.
+        if: always()
