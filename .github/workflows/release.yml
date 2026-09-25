@@ -282,12 +282,14 @@ jobs:
           else
             echo "LLVM out = ${gb} GB — skipping save (>= 9.5 GB cache limit)"
           fi
-          # A cache-save hiccup must NEVER sink the build (run 35498864447 failed
-          # here at ~60 min, after a successful LLVM compile). Exit 0 unconditionally.
           exit 0
       - name: Cache LLVM out
-        if: env.LLVM_OUT == '1'
-        continue-on-error: true
+        # Only a run that BUILT LLVM (restore missed the cache) saves it.
+        # A run that restored the cache re-saving the same static key is a
+        # no-op collision ("Unable to reserve cache ...") — never do it.
+        # No continue-on-error: a save of a COMPLETED artefact that fails
+        # is a hard error, not a warning.
+        if: env.LLVM_OUT == '1' && steps.llvm-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/llvm/out
@@ -326,8 +328,11 @@ jobs:
           fi
           exit 0
       - name: Cache WASI out
-        if: env.WASI_OUT == '1'
-        continue-on-error: true
+        # Only a run that BUILT the WASI SDK (restore missed the cache)
+        # saves it; re-saving a restored static key is a no-op collision.
+        # No continue-on-error: a failed save of a COMPLETED artefact is a
+        # hard error, not a warning.
+        if: env.WASI_OUT == '1' && steps.wasi-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/wasi-sdk/build/install/wasi
@@ -408,7 +413,6 @@ jobs:
         run: bash run_p3_stage.sh "gmscore glean glean_as" p3a
 
       - name: P3a checkpoint — deps
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -451,7 +455,6 @@ jobs:
         # above completed (a failure or a reclaim never reaches here).
         # continue-on-error: a failed/oversize save must not kill a
         # healthy completed build — the next step proceeds regardless.
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -467,7 +470,6 @@ jobs:
         # above completed (a failure or a reclaim never reaches here).
         # continue-on-error: a failed/oversize save must not kill a
         # healthy completed build — the next step proceeds regardless.
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -483,7 +485,6 @@ jobs:
         # above completed (a failure or a reclaim never reaches here).
         # continue-on-error: a failed/oversize save must not kill a
         # healthy completed build — the next step proceeds regardless.
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -500,7 +501,6 @@ jobs:
         # above completed (a failure or a reclaim never reaches here).
         # continue-on-error: a failed/oversize save must not kill a
         # healthy completed build — the next step proceeds regardless.
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -516,7 +516,6 @@ jobs:
         # above completed (a failure or a reclaim never reaches here).
         # continue-on-error: a failed/oversize save must not kill a
         # healthy completed build — the next step proceeds regardless.
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -531,7 +530,6 @@ jobs:
         # above completed (a failure or a reclaim never reaches here).
         # continue-on-error: a failed/oversize save must not kill a
         # healthy completed build — the next step proceeds regardless.
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
@@ -539,7 +537,6 @@ jobs:
 
 
       - name: P3b1 checkpoint — build dirs (mach build done)
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -561,7 +558,6 @@ jobs:
         run: bash ci_p3_guard.sh
 
       - name: P3b checkpoint — deps
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -571,7 +567,6 @@ jobs:
 
       - name: P3b checkpoint — build dirs
         if: steps.ck-b.conclusion == 'success'
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -589,7 +584,6 @@ jobs:
         run: bash ci_p3_guard.sh
 
       - name: P3c checkpoint — deps
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -599,7 +593,6 @@ jobs:
 
       - name: P3c checkpoint — build dirs
         if: steps.ck-c.conclusion == 'success'
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -612,7 +605,6 @@ jobs:
         run: bash run_p3_stage.sh "upush ac" p3d
 
       - name: P3d checkpoint — deps
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -630,7 +622,6 @@ jobs:
         run: bash ci_p3_guard.sh
 
       - name: P3e checkpoint — deps
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -640,7 +631,6 @@ jobs:
 
       - name: P3e checkpoint — build dirs
         if: steps.ck-e.conclusion == 'success'
-        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
