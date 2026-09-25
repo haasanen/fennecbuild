@@ -442,7 +442,10 @@ jobs:
       - name: "P3b1 seg 1 — mach build (10-min budget)"
         id: seg1
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -476,7 +479,10 @@ jobs:
         id: seg2
         if: ${{ steps.seg1.conclusion == 'success' && steps.seg1.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -510,7 +516,10 @@ jobs:
         id: seg3
         if: ${{ steps.seg2.conclusion == 'success' && steps.seg2.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -544,7 +553,10 @@ jobs:
         id: seg4
         if: ${{ steps.seg3.conclusion == 'success' && steps.seg3.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -578,7 +590,10 @@ jobs:
         id: seg5
         if: ${{ steps.seg4.conclusion == 'success' && steps.seg4.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -612,7 +627,10 @@ jobs:
         id: seg6
         if: ${{ steps.seg5.conclusion == 'success' && steps.seg5.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -646,7 +664,10 @@ jobs:
         id: seg7
         if: ${{ steps.seg6.conclusion == 'success' && steps.seg6.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -680,7 +701,10 @@ jobs:
         id: seg8
         if: ${{ steps.seg7.conclusion == 'success' && steps.seg7.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -714,7 +738,10 @@ jobs:
         id: seg9
         if: ${{ steps.seg8.conclusion == 'success' && steps.seg8.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -748,7 +775,10 @@ jobs:
         id: seg10
         if: ${{ steps.seg9.conclusion == 'success' && steps.seg9.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -782,7 +812,10 @@ jobs:
         id: seg11
         if: ${{ steps.seg10.conclusion == 'success' && steps.seg10.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -816,7 +849,10 @@ jobs:
         id: seg12
         if: ${{ steps.seg11.conclusion == 'success' && steps.seg11.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -850,7 +886,10 @@ jobs:
         id: seg13
         if: ${{ steps.seg12.conclusion == 'success' && steps.seg12.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -884,7 +923,10 @@ jobs:
         id: seg14
         if: ${{ steps.seg13.conclusion == 'success' && steps.seg13.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -918,7 +960,10 @@ jobs:
         id: seg15
         if: ${{ steps.seg14.conclusion == 'success' && steps.seg14.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -952,7 +997,10 @@ jobs:
         id: seg16
         if: ${{ steps.seg15.conclusion == 'success' && steps.seg15.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -986,7 +1034,10 @@ jobs:
         id: seg17
         if: ${{ steps.seg16.conclusion == 'success' && steps.seg16.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1020,7 +1071,10 @@ jobs:
         id: seg18
         if: ${{ steps.seg17.conclusion == 'success' && steps.seg17.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1054,7 +1108,10 @@ jobs:
         id: seg19
         if: ${{ steps.seg18.conclusion == 'success' && steps.seg18.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1088,7 +1145,10 @@ jobs:
         id: seg20
         if: ${{ steps.seg19.conclusion == 'success' && steps.seg19.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1122,7 +1182,10 @@ jobs:
         id: seg21
         if: ${{ steps.seg20.conclusion == 'success' && steps.seg20.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1156,7 +1219,10 @@ jobs:
         id: seg22
         if: ${{ steps.seg21.conclusion == 'success' && steps.seg21.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1190,7 +1256,10 @@ jobs:
         id: seg23
         if: ${{ steps.seg22.conclusion == 'success' && steps.seg22.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
@@ -1224,7 +1293,10 @@ jobs:
         id: seg24
         if: ${{ steps.seg23.conclusion == 'success' && steps.seg23.outputs.done == 'false' }}
         env:
-          SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
+          SEGMENT_SECS: "1200"   # 20 min: a 10-min segment spent ~3 min on
+          # per-segment gradle/JNI restart + ~1.5 min checkpoint upload (~45%
+          # overhead). 20 min amortizes that; worst-case reclaim loss is still
+          # bounded to one segment (save runs at the boundary).
         run: |
           set -u
           rc=0
