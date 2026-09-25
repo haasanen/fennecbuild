@@ -28,10 +28,11 @@
 # the retry re-runs earlier slices as up-to-date no-ops). Unset STAGES runs
 # everything — the local / F-Droid path is unchanged.
 # 'gecko' still runs all three gecko sub-stages (so the local path and any
-# STAGES='gecko' caller are unchanged); CI uses the sub-stages to checkpoint
-# between them — a runner reclaimed mid-gecko then resumes at the next
-# sub-stage (or, for gecko_build's time-boxed segments, at the last
-# mach-build checkpoint). Sub-stages assume their predecessors completed —
+# STAGES='gecko' caller are unchanged); CI runs gecko_build once per mach-
+# build tier (MACH_BUILD_TARGETS) as separate workflow steps and checkpoints
+# between them — a runner reclaimed mid-gecko then resumes at the next step
+# (or, after a tier completes, from the cached finished state). Sub-stages
+# assume their predecessors completed —
 # their state arrives via the checkpoint caches restored at job start:
 # gecko_package needs mach build's obj/, gecko_gv needs the packaged gecko.
 set -e
@@ -77,7 +78,11 @@ fi
 
 if run_stage gecko || run_stage gecko_build; then
 pushd "$mozilla_release"
-./mach build
+# MACH_BUILD_TARGETS: run ONE logical mach-build tier (pre-export, export,
+# pre-compile, binaries, faster) instead of the full build — the workflow
+# runs the tiers as separate steps, each to completion. Unset = full build
+# (local / F-Droid path unchanged).
+./mach build ${MACH_BUILD_TARGETS:-}
 popd
 fi
 
