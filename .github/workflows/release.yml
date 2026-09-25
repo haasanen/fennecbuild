@@ -144,28 +144,40 @@ jobs:
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           df -h /
 
-      - name: Clone srclibs (pinned, shallow)
+      - name: Clone srclibs (pinned, shallow; 3x retry — shared-runner network flakes)
         run: |
           set -e
           SIB=..
           mkdir -p "$SIB/srclib"
+          # Run #33 lost 3 of 5 attempts to transient clone failures (exit 128);
+          # retry with backoff instead of burning the whole attempt budget.
+          gclone() { # <url> <ref> <dest>
+            local i
+            for i in 1 2 3; do
+              if git clone --depth 1 --branch "$2" "$1" "$3"; then return 0; fi
+              echo "clone of $3 failed (attempt $i/3), retrying in $((i*30))s"
+              rm -rf "$3"
+              sleep $((i*30))
+            done
+            echo "FATAL: clone of $3 failed 3 times"
+            return 1
+          }
           echo "=== MozFennec (mozilla-central @ FIREFOX-ANDROID_155_0_RELEASE)"
-          git clone --depth 1 --branch FIREFOX-ANDROID_155_0_RELEASE \
-            https://github.com/mozilla-firefox/firefox "$SIB/srclib/MozFennec"
+          gclone https://github.com/mozilla-firefox/firefox FIREFOX-ANDROID_155_0_RELEASE "$SIB/srclib/MozFennec"
           df -h /
           echo "=== MozAppServices @ v155.0 (+submodules)"
-          git clone --depth 1 --branch v155.0 https://github.com/mozilla/application-services "$SIB/srclib/MozAppServices"
+          gclone https://github.com/mozilla/application-services v155.0 "$SIB/srclib/MozAppServices"
           (cd "$SIB/srclib/MozAppServices" && git submodule update --init --depth 1)
           df -h /
           echo "=== Glean (v68.0.1 / v68.0.0)"
-          git clone --depth 1 --branch v68.0.1 https://github.com/mozilla/glean "$SIB/srclib/MozGlean"
-          git clone --depth 1 --branch v68.0.0 https://github.com/mozilla/glean "$SIB/srclib/MozGleanAS"
+          gclone https://github.com/mozilla/glean v68.0.1 "$SIB/srclib/MozGlean"
+          gclone https://github.com/mozilla/glean v68.0.0 "$SIB/srclib/MozGleanAS"
           echo "=== UnifiedPushAC @ 1.0.6"
-          git clone --depth 1 --branch 1.0.6 https://gitlab.com/ironfox-oss/unifiedpush-ac "$SIB/srclib/UnifiedPushAC"
+          gclone https://gitlab.com/ironfox-oss/unifiedpush-ac 1.0.6 "$SIB/srclib/UnifiedPushAC"
           echo "=== gmscore @ v0.3.16.252432"
-          git clone --depth 1 --branch v0.3.16.252432 https://github.com/microg/GmsCore "$SIB/srclib/gmscore"
+          gclone https://github.com/microg/GmsCore v0.3.16.252432 "$SIB/srclib/gmscore"
           echo "=== wasi-sdk @ wasi-sdk-20 (+submodules)"
-          git clone --depth 1 --branch wasi-sdk-20 https://github.com/WebAssembly/wasi-sdk "$SIB/srclib/wasi-sdk"
+          gclone https://github.com/WebAssembly/wasi-sdk wasi-sdk-20 "$SIB/srclib/wasi-sdk"
           (cd "$SIB/srclib/wasi-sdk" && git submodule update --init --depth 1)
           df -h /
           echo "=== llvm @ 3b5e7c83 (llvm-project commit)"
@@ -198,6 +210,32 @@ jobs:
           # workflow_dispatch only) — fall back to the release version.
           ./prebuild.sh "${{ inputs.version_name || '155.0.0' }}" "${{ inputs.version_code || '1550020' }}"
           df -h /
+
+      - name: Pin source mtimes (deterministic snapshot for incremental restores)
+        run: |
+          # Fresh-cloned sources carry mtime=now and the patch step just wrote
+          # new files, while a restored obj/ keeps its ORIGINAL build mtimes
+          # (actions/cache preserves them). With sources newer than the
+          # restored artifacts, cargo/ninja/autoconf treat EVERYTHING as dirty:
+          # runs #30-33 showed 874 'Compiling' / 0 'Fresh' crates per segment
+          # and a 20s re-configure (config.status stale) — the checkpoint
+          # chain never advanced past the first ~377 rust crates. Pin every
+          # source file to a fixed timestamp OLDER than any real build, so a
+          # restored obj/ is always strictly newer than its inputs and
+          # resumes incrementally. Must run AFTER prebuild (patches modify the
+          # source tree) and BEFORE the phase-3 restores below.
+          SNAP=$(date -d '2026-09-01 00:00:00 UTC' +%s)
+          for d in "$SRCLIB_DIR/MozFennec" "$SRCLIB_DIR/MozAppServices"; do
+            [ -d "$d" ] || continue
+            echo "pinning mtimes under $d -> @${SNAP}"
+            # Whole tree, dirs included: a restored obj/target lands here AFTER
+            # this step and its artifacts keep their original (newer) build
+            # mtimes, so nothing pinned is ever newer than a real artifact.
+            find "$d" -depth -exec touch -h -d "@${SNAP}" {} + 2>/dev/null || true
+          done
+          # Sanity: a pinned source must be strictly older than build time.
+          NEW=$(date +%s)
+          [ "$SNAP" -lt "$NEW" ] && echo "SNAP=${SNAP} < now=${NEW}: OK"
 
       - name: Restore LLVM toolchain (if cached from a previous run)
         id: llvm-restore
@@ -335,19 +373,6 @@ jobs:
             fennec-p3-build-v1-
             fennec-p3-build-v1
 
-      - name: Touch restored build dirs (mtime-sensitive toolchains)
-        run: |
-          # Fresh-cloned sources are newer than cache-restored artifacts, and
-          # cargo/make decide freshness by mtime (gradle uses content hashes).
-          # Move the restored trees to 'now' so a resumed stage treats cached
-          # objects as up to date instead of rebuilding everything.
-          for d in "$SRCLIB_DIR/MozFennec/obj" "$SRCLIB_DIR/MozAppServices/target"; do
-            if [ -d "$d" ]; then
-              echo "touching $d"
-              find "$d" -exec touch {} + 2>/dev/null || true
-            fi
-          done
-
       - name: P3b1 restore latest mach-build segment
         # Newest time-boxed `mach build` checkpoint of ANY previous run or
         # attempt (actions/cache returns the most-recently-created cache
@@ -420,10 +445,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s1" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -458,10 +479,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s2" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -496,10 +513,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s3" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -534,10 +547,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s4" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -572,10 +581,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s5" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -610,10 +615,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s6" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -648,10 +649,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s7" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -686,10 +683,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s8" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -724,10 +717,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s9" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -762,10 +751,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s10" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -800,10 +785,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s11" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -838,10 +819,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s12" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -876,10 +853,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s13" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -914,10 +887,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s14" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -952,10 +921,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s15" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -990,10 +955,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s16" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1028,10 +989,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s17" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1066,10 +1023,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s18" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1104,10 +1057,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s19" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1142,10 +1091,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s20" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1180,10 +1125,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s21" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1218,10 +1159,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s22" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1256,10 +1193,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s23" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
@@ -1294,10 +1227,6 @@ jobs:
           SEGMENT_SECS: "600"    # 10 min; keep < observed reclaim window
         run: |
           set -u
-          OBJ="$SRCLIB_DIR/MozFennec/obj"
-          # obj/ restored from a segment checkpoint or still warm: keep mtimes
-          # >= sources so mach/ninja treat it as up to date.
-          if [ -d "$OBJ" ]; then find "$OBJ" -exec touch {} + 2>/dev/null || true; fi
           rc=0
           bash run_p3_segment.sh "gecko_build" "p3b1-s24" "${SEGMENT_SECS}" || rc=$?
           if [ "$rc" = "0" ]; then
