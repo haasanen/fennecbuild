@@ -58,19 +58,6 @@ jobs:
         run: |
           echo "=== df (start) ==="; df -h / /home; free -h; nproc
 
-      - name: "DIAGNOSTIC — busy probe (remove after the experiment)"
-        # 30 min of real CPU work (one busy worker per core) at the very
-        # start of the job, before any build happens. Tests whether the
-        # hosted runner terminates the job after a finite job lifetime
-        # regardless of what the job is doing: if the same SIGTERM/143
-        # shutdown-signal signature appears mid-probe, the lifetime
-        # hypothesis holds and the small-step+checkpoint fix is correct;
-        # if the probe COMPLETES 30 min, job lifetime is not the trigger
-        # and the build's own resource use is the suspect.
-        # No log files: the per-30s state lines on the console ARE the record.
-        run: |
-          bash .github/workflows/busy_probe.sh 30
-
       - name: Install build dependencies (mirrors fdroiddata sudo block)
         run: |
           sudo apt-get update
@@ -724,3 +711,14 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/haasanen/fdroid-repo/actions/workflows/update.yml/dispatches \
             -d '{"ref":"main"}' || true
+
+      # Backstop: print GitHub's own failure record for this job to the
+      # console on ANY job failure. Runner-level errors (lost communication /
+      # CPU-mem starvation) live in the job's check-run annotations, not in
+      # the step log — and a run whose runner died can lose the log blob
+      # entirely (API: BlobNotFound), so the annotations are the durable
+      # surface. The per-stage handler in run_p3_stage.sh prints it earlier,
+      # at the failing stage; this covers non-stage steps too.
+      - name: Surface the job's check-run annotations (on failure)
+        if: failure()
+        run: bash .github/workflows/ci_annotations.sh

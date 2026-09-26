@@ -37,4 +37,23 @@ bash "$(dirname "$0")/build-rest.sh"
 rc=$?
 kill "$WATCH" 2>/dev/null || true
 echo "== [$TAG] rc=$rc $(date -u +%H:%M:%S) UTC df: $(df -h / | tail -1) =="
+if [ "$rc" -ne 0 ]; then
+    # Surface GitHub's own failure record for this job on the console.
+    # Runner-level failures (lost communication / CPU-mem starvation) are
+    # recorded in the job's check-run annotations, not the step log — and a
+    # run whose runner died can lose the log blob entirely. Print both the
+    # annotations and the job's cgroup memory state right now, while the
+    # runner still has network.
+    bash "$(dirname "$0")/ci_annotations.sh" || true
+    echo "== [$TAG] final cgroup memory state (rc=$rc): =="
+    bash -c '
+      [ -r /sys/fs/cgroup/memory.max ] && {
+        echo "  cg2 max=$(cat /sys/fs/cgroup/memory.max) cur=$(cat /sys/fs/cgroup/memory.current 2>/dev/null) peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)"
+      }
+      [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ] && {
+        echo "  cg1 limit=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes) usage=$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null)"
+      }
+      echo "  swap: $(free -h | awk "/Swap:/{print \$3\" used / \"\$2\" total\"}")"
+    ' 2>/dev/null || true
+fi
 exit "$rc"
