@@ -503,8 +503,14 @@ jobs:
       - name: "P3b1.4 — mach build binaries"
         # Compile and link all C/C++/Rust sources — the long step.
         # No time limit: it runs until every object, crate and binary is built.
+        # CARGO_BUILD_JOBS=1 (observe-first, 2026-09-26): the 15 GiB machine
+        # saturated at the geckoservo codegen peak with 4 parallel rustc
+        # (run 36274687731: 12Gi used + swap at the peak). Build with one
+        # rustc at a time until the telemetry shows the peak is low enough
+        # to raise it again.
         env:
           MACH_BUILD_TARGETS: "binaries"
+          CARGO_BUILD_JOBS: "1"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-bin
 
       - name: "P3b1.4 — save completed obj (bin)"
@@ -518,8 +524,11 @@ jobs:
           key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-bin
       - name: "P3b1.5 — mach build faster"
         # Everything binaries does not cover (JS, XUL, CSS, ...).
+        # CARGO_BUILD_JOBS=1: same observe-first rationale as P3b1.4 (any
+        # rust not built fresh in binaries would otherwise run 4-deep).
         env:
           MACH_BUILD_TARGETS: "faster"
+          CARGO_BUILD_JOBS: "1"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-fast
 
       - name: "P3b1.5 — save completed obj (fast)"
