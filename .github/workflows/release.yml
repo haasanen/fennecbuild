@@ -433,6 +433,28 @@ jobs:
       # NOTE: the `path:` in every save step MUST stay byte-identical to
       # the `P3b1 restore latest obj checkpoint` restore step above — the
       # cache 'version' hash is computed over the literal path string.
+      - name: "P3a.5 — stop lingering Gradle daemons (free RAM for rust codegen)"
+        # The P3a gradle builds (gmscore/glean) leave JVM daemons behind:
+        # run 36274687731 showed java at 3.1-3.9 GiB still resident when
+        # the binaries tier started rust codegen — 12 GiB of the 15 GiB
+        # machine was used at the geckoservo codegen peak, swap engaged,
+        # and the runner then killed the job (its own agent starved).
+        # The mach tiers need no gradle; stop the daemons so the peak
+        # has ~4 GiB more headroom. (The later gecko_gv stage starts its
+        # own fresh daemon — unaffected.)
+        run: |
+          before=$(ps -eo rss=,comm= 2>/dev/null | awk '$2=="java"{s+=$1} END{printf "%dMiB", s/1024}')
+          echo "java RSS before: ${before:-0MiB}"
+          gradle --stop 2>/dev/null || true
+          for p in $(pgrep -f "GradleDaemon" 2>/dev/null); do
+            echo "stopping gradle daemon pid $p"
+            kill "$p" 2>/dev/null || true
+          done
+          sleep 5
+          after=$(ps -eo rss=,comm= 2>/dev/null | awk '$2=="java"{s+=$1} END{printf "%dMiB", s/1024}')
+          echo "java RSS after: ${after:-0MiB}"
+          free -h | head -2
+
       - name: "P3b1.1 — mach build pre-export"
         # Generate everything the export tier needs. Short step.
         env:

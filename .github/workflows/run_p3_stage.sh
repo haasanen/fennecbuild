@@ -13,11 +13,9 @@ WS="$GITHUB_WORKSPACE"
 echo "== [$TAG] start $(date -u +%H:%M:%S) UTC stages='$STAGES' df: $(df -h / | tail -1) =="
 
 # Sample the job's REAL resource use (top-5 processes by RSS, total RSS of
-# rustc/cargo/clang/lld, mem/swap) to the console every 60 s. Hosted Compute
-# Agent runners do not expose the cgroup filesystem, so per-process RSS is
-# the record: at the moment a step dies, we see exactly what process was
-# using the most memory and whether the machine's 15 GiB was near-full.
-bash "$(dirname "$0")/resource_watch.sh" 60 &
+# rustc/cargo/clang/lld, mem/swap) to the console every 30 s — fine enough
+# to catch the geckoservo codegen peak. Console only, no files.
+bash "$(dirname "$0")/resource_watch.sh" 30 &
 WATCH=$!
 
 # If the runner (or anything else) signals us, say so on STDERR (captured by
@@ -26,6 +24,13 @@ WATCH=$!
 on_signal() {
     local sig="$1"
     echo "== [$TAG] KILLED by SIG${sig} at $(date -u +%H:%M:%S) UTC (stages='$STAGES') — no build error above this line means the job was interrupted, not failed ==" >&2
+    # Snapshot the resource state AT the moment of death to the console
+    # (local only, no network — the runner is shutting down). The res_watch
+    # 30s samples show the trajectory; this is the final frame.
+    bash -c '
+      echo "== [$TAG] memory at signal: $(free -h | awk "/Mem:/{print \$3\" used, \"\$7\" free\"}") | swap: $(free -h | awk "/Swap:/{print \$3\" used\"}")"
+      echo "== [$TAG] top5 RSS at signal: $(ps -eo rss=,comm= | sort -rn | head -5 | awk "{printf \"%s(%dMiB) \", \$2, \$1/1024}")"
+    ' 2>/dev/null >&2 || true
     kill "$WATCH" 2>/dev/null || true
     trap - "$sig"
     kill -s "$sig" $$
