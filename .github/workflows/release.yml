@@ -92,7 +92,7 @@ jobs:
           # 8.14.3, geckoview/fenix 9.7.0). A single 9.7.0 breaks gmscore (its AGP
           # uses InternalProblems, removed in Gradle 9.6.0). Replicate F-Droid:
           # a shim that reads the current project's wrapper and uses that version.
-          install -m 0755 gradle-wrapper.sh /usr/local/bin/gradle
+          install -m 0755 .github/workflows/gradle-wrapper.sh /usr/local/bin/gradle
           echo "which gradle -> $(command -v gradle)"
           cat /usr/local/bin/gradle | head -5
 
@@ -255,9 +255,9 @@ jobs:
 
       - name: Phase 1/3 — LLVM toolchain (or restore from cache)
         run: |
-          bash ci_heartbeat.sh "$GITHUB_WORKSPACE" &
+          bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
           echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
-          ./build-llvm.sh
+          .github/workflows/build-llvm.sh
           rc=$?
           kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (after LLVM) ==="; df -h /
@@ -294,9 +294,9 @@ jobs:
 
       - name: Phase 2/3 — WASI SDK (or restore from cache)
         run: |
-          bash ci_heartbeat.sh "$GITHUB_WORKSPACE" &
+          bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
           echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
-          ./build-wasi.sh
+          .github/workflows/build-wasi.sh
           rc=$?
           kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (after WASI) ==="; df -h /
@@ -394,12 +394,12 @@ jobs:
 
       - name: Phase 3 heartbeat
         run: |
-          bash ci_heartbeat.sh "$GITHUB_WORKSPACE" &
+          bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
           echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
 
       - name: Phase 3a — microG libs + Glean (publishToMavenLocal)
         id: p3a
-        run: bash run_p3_stage.sh "gmscore glean glean_as" p3a
+        run: bash .github/workflows/run_p3_stage.sh "gmscore glean glean_as" p3a
 
       - name: P3a checkpoint — deps
         uses: actions/cache/save@v4
@@ -437,7 +437,7 @@ jobs:
         # Generate everything the export tier needs. Short step.
         env:
           MACH_BUILD_TARGETS: "pre-export"
-        run: bash run_p3_stage.sh "gecko_build" p3b1-pe
+        run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-pe
 
       - name: "P3b1.1 — save completed obj (pe)"
         # Finished state of this build step — saved only because the step
@@ -452,7 +452,7 @@ jobs:
         # Generate everything the compile tier needs (JS bundles, headers, ...).
         env:
           MACH_BUILD_TARGETS: "export"
-        run: bash run_p3_stage.sh "gecko_build" p3b1-exp
+        run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-exp
 
       - name: "P3b1.2 — save completed obj (exp)"
         # Finished state of this build step — saved only because the step
@@ -467,7 +467,7 @@ jobs:
         # Generate everything needed DURING the compile.
         env:
           MACH_BUILD_TARGETS: "pre-compile"
-        run: bash run_p3_stage.sh "gecko_build" p3b1-prec
+        run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-prec
 
       - name: "P3b1.3 — save completed obj (prec)"
         # Finished state of this build step — saved only because the step
@@ -483,7 +483,7 @@ jobs:
         # No time limit: it runs until every object, crate and binary is built.
         env:
           MACH_BUILD_TARGETS: "binaries"
-        run: bash run_p3_stage.sh "gecko_build" p3b1-bin
+        run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-bin
 
       - name: "P3b1.4 — save completed obj (bin)"
         # Finished state of this build step — saved only because the step
@@ -498,7 +498,7 @@ jobs:
         # Everything binaries does not cover (JS, XUL, CSS, ...).
         env:
           MACH_BUILD_TARGETS: "faster"
-        run: bash run_p3_stage.sh "gecko_build" p3b1-fast
+        run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-fast
 
       - name: "P3b1.5 — save completed obj (fast)"
         # Finished state of this build step — saved only because the step
@@ -512,7 +512,7 @@ jobs:
       - name: "P3b1.6 — mach build (completion gate)"
         # Vanilla mach build: remaining tiers (libs, misc, tools, syms)
         # — the gate that proves the whole gecko build is finished.
-        run: bash run_p3_stage.sh "gecko_build" p3b1-done
+        run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-done
 
       - name: "P3b1.6 — save completed obj (done)"
         # Finished state of this build step — saved only because the step
@@ -535,16 +535,16 @@ jobs:
 
       - name: Phase 3b2 — Gecko package + package-multi-locale
         id: p3b2
-        run: bash run_p3_stage.sh "gecko_package" p3b2
+        run: bash .github/workflows/run_p3_stage.sh "gecko_package" p3b2
 
       - name: Phase 3b3 — GeckoView publishToMavenLocal
         id: p3b3
-        run: bash run_p3_stage.sh "gecko_gv" p3b3
+        run: bash .github/workflows/run_p3_stage.sh "gecko_gv" p3b3
 
       - name: P3b checkpoint guard (build dirs < 9 GB)
         id: ck-b
         continue-on-error: true
-        run: bash ci_p3_guard.sh
+        run: bash .github/workflows/ci_p3_guard.sh
 
       - name: P3b checkpoint — deps
         uses: actions/cache/save@v4
@@ -565,12 +565,12 @@ jobs:
 
       - name: Phase 3c — AppServices (concept-fetch shim, NSS, nimbus-fml)
         id: p3c
-        run: bash run_p3_stage.sh "ac_fetch150 appservices" p3c
+        run: bash .github/workflows/run_p3_stage.sh "ac_fetch150 appservices" p3c
 
       - name: P3c checkpoint guard (build dirs < 9 GB)
         id: ck-c
         continue-on-error: true
-        run: bash ci_p3_guard.sh
+        run: bash .github/workflows/ci_p3_guard.sh
 
       - name: P3c checkpoint — deps
         uses: actions/cache/save@v4
@@ -591,7 +591,7 @@ jobs:
 
       - name: Phase 3d — UnifiedPush + Android Components
         id: p3d
-        run: bash run_p3_stage.sh "upush ac" p3d
+        run: bash .github/workflows/run_p3_stage.sh "upush ac" p3d
 
       - name: P3d checkpoint — deps
         uses: actions/cache/save@v4
@@ -603,12 +603,12 @@ jobs:
 
       - name: Phase 3e — Fenix assembleRelease
         id: p3e
-        run: bash run_p3_stage.sh "fenix" p3e
+        run: bash .github/workflows/run_p3_stage.sh "fenix" p3e
 
       - name: P3e checkpoint guard (build dirs < 9 GB)
         id: ck-e
         continue-on-error: true
-        run: bash ci_p3_guard.sh
+        run: bash .github/workflows/ci_p3_guard.sh
 
       - name: P3e checkpoint — deps
         uses: actions/cache/save@v4

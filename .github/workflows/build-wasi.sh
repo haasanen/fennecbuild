@@ -4,7 +4,7 @@
 # can cache the completed WASI install before the (longer, more failure-prone)
 # Gecko/Fenix phase starts.
 set -e
-source "$(dirname "$0")/paths.sh"
+source "$(dirname "$0")/../../paths.sh"
 
 # Build WASI SDK (skip when the sysroot install exists, e.g. restored from cache)
 pushd "$wasi"

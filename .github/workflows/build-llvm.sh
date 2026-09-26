@@ -3,7 +3,7 @@
 # Split out of build.sh so a mid-WASI runner death still lets the workflow
 # cache the completed LLVM out/ (build.sh alone would never save it).
 set -e
-source "$(dirname "$0")/paths.sh"
+source "$(dirname "$0")/../../paths.sh"
 
 # We publish the artifacts into a local Maven repository instead of using the
 # auto-publication workflow because the latter does not work for Gradle

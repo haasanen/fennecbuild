@@ -41,7 +41,7 @@ set -e
 # chunk — potentially the final errors — is lost. PYTHONUNBUFFERED makes it
 # write every line the moment it is produced.
 export PYTHONUNBUFFERED=1
-source "$(dirname "$0")/paths.sh"
+source "$(dirname "$0")/../../paths.sh"
 
 STAGES="${STAGES:-all}"
 run_stage() {
