@@ -12,10 +12,12 @@ export STAGES
 WS="$GITHUB_WORKSPACE"
 echo "== [$TAG] start $(date -u +%H:%M:%S) UTC stages='$STAGES' df: $(df -h / | tail -1) =="
 
-# Sample the job's REAL memory ceiling (cgroup) to the console every 60 s.
-# The host-wide `free` never shows a cgroup limit, so without this a build
-# that crosses its own memory ceiling dies with no trace in the log.
-bash "$(dirname "$0")/cgroup_watch.sh" 60 &
+# Sample the job's REAL resource use (top-5 processes by RSS, total RSS of
+# rustc/cargo/clang/lld, mem/swap) to the console every 60 s. Hosted Compute
+# Agent runners do not expose the cgroup filesystem, so per-process RSS is
+# the record: at the moment a step dies, we see exactly what process was
+# using the most memory and whether the machine's 15 GiB was near-full.
+bash "$(dirname "$0")/resource_watch.sh" 60 &
 WATCH=$!
 
 # If the runner (or anything else) signals us, say so on STDERR (captured by
@@ -42,18 +44,14 @@ if [ "$rc" -ne 0 ]; then
     # Runner-level failures (lost communication / CPU-mem starvation) are
     # recorded in the job's check-run annotations, not the step log — and a
     # run whose runner died can lose the log blob entirely. Print both the
-    # annotations and the job's cgroup memory state right now, while the
-    # runner still has network.
+    # annotations and the job's memory state right now, while the runner
+    # still has network.
     bash "$(dirname "$0")/ci_annotations.sh" || true
-    echo "== [$TAG] final cgroup memory state (rc=$rc): =="
+    echo "== [$TAG] final memory state (rc=$rc): =="
     bash -c '
-      [ -r /sys/fs/cgroup/memory.max ] && {
-        echo "  cg2 max=$(cat /sys/fs/cgroup/memory.max) cur=$(cat /sys/fs/cgroup/memory.current 2>/dev/null) peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)"
-      }
-      [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ] && {
-        echo "  cg1 limit=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes) usage=$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null)"
-      }
+      echo "  mem: $(free -h | awk "/Mem:/{print \$3\" used, \"\$7\" free\"}")"
       echo "  swap: $(free -h | awk "/Swap:/{print \$3\" used / \"\$2\" total\"}")"
+      echo "  top5 by RSS: $(ps -eo rss=,comm= | sort -rn | head -5 | awk "{printf \"%s(%dMiB) \", \$2, \$1/1024}")"
     ' 2>/dev/null || true
 fi
 exit "$rc"
