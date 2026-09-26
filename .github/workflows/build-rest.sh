@@ -126,7 +126,12 @@ pushd "$mozilla_release"
 # pre-compile, binaries, faster) instead of the full build — the workflow
 # runs the tiers as separate steps, each to completion. Unset = full build
 # (local / F-Droid path unchanged).
-./mach build ${MACH_BUILD_TARGETS:-}
+# MACH_BUILD_JOBS: parallelism for this tier (mach build -jN). N=1 serializes
+# rust codegen — the CARGO_BUILD_JOBS env var alone does NOT, because make
+# hands cargo its jobserver when running with -j>1 and cargo uses that
+# (see config/makefiles/rust.mk: only a literal -j1 in MAKEFLAGS forces
+# one cargo job). Set by CI while we measure the memory peak.
+./mach build ${MACH_BUILD_TARGETS:-} ${MACH_BUILD_JOBS:+-j${MACH_BUILD_JOBS}}
 popd
 fi
 
