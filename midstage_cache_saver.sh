@@ -38,24 +38,20 @@
 #   MIDSTAGE_MIN_FREE_GB refuse if RUNNER_TEMP free < this (default 2)
 #   MIDSTAGE_CHUNK_MB   upload chunk MiB (default 32 = toolkit default)
 #   MIDSTAGE_ZSTD_LEVEL zstd -N (default 1: cheap while a build co-runs)
-#   MIDSTAGE_LOG        heartbeat log (default $GITHUB_WORKSPACE/midstage_saver.log)
 #   DRY_RUN=1           build the archive, log the exact API calls, POST nothing
 # Exit codes: 0 saved | 10 benign skip (env absent / too big / key exists)
-#             20 real failure. NEVER a mystery: every path logs to the log.
+#             20 real failure. NEVER a mystery: every path prints to STDOUT.
 set -u -o pipefail
 
 WS="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
-LOG="${MIDSTAGE_LOG:-$WS/midstage_saver.log}"
 MAX_GB="${MIDSTAGE_MAX_GB:-9.5}"
 MIN_FREE_GB="${MIDSTAGE_MIN_FREE_GB:-2}"
 CHUNK_MB="${MIDSTAGE_CHUNK_MB:-32}"
 ZSTD_LEVEL="${MIDSTAGE_ZSTD_LEVEL:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 
-log() { # one line per event, heartbeat-visible (build_full.log tailers see it)
-    local line
-    line="midstage-saver $(date -u +%H:%M:%S) $*"
-    echo "$line" | tee -a "$LOG"
+log() { # every event goes to the build's STDOUT (the console)
+    echo "midstage-saver $(date -u +%H:%M:%S) $*"
 }
 
 if [ $# -lt 2 ]; then
@@ -166,7 +162,7 @@ reserve_ok() {
     curl -sS -o "$RJSON" -w "%{http_code}" -X POST \
         -H "$H_AUTH" -H "$H_ACC" -H "Content-Type: application/json" \
         -d "{\"key\":\"$KEY\",\"version\":\"$VERSION\",\"cacheSize\":$SIZE_BYTES}" \
-        "${BASE}_apis/artifactcache/caches" > "$STAGEDIR/reserve.code" 2>>"$LOG"
+        "${BASE}_apis/artifactcache/caches" > "$STAGEDIR/reserve.code" 2>&1
 }
 if ! RETRY "reserve cache" reserve_ok; then
     log "FAIL: reserve unreachable"; rm -rf "$STAGEDIR"; exit 20

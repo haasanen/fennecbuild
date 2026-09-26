@@ -25,11 +25,8 @@ trap 'on_signal TERM' TERM
 trap 'on_signal INT'  INT
 trap 'on_signal HUP'  HUP
 
-# stdbuf: line-buffer tee's file writes. Without it, tee file-buffers, and a
-# mid-build SIGTERM kills it with up to 64 KB of the last lines still in its
-# buffer — never reaching the captured console. With it, everything is on
-# STDOUT as it is produced; the console capture can't be left behind.
-bash "$(dirname "$0")/build-rest.sh" 2>&1 | stdbuf -oL -eL tee -a "$WS/build_full.log"
-rc=${PIPESTATUS[0]}
+# Output goes straight to the console (STDOUT/STDERR), captured normally.
+bash "$(dirname "$0")/build-rest.sh"
+rc=$?
 echo "== [$TAG] rc=$rc $(date -u +%H:%M:%S) UTC df: $(df -h / | tail -1) =="
 exit "$rc"

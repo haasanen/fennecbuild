@@ -48,8 +48,38 @@ run_stage() {
     esac
 }
 
+# A published-to-mavenLocal artefact is the durable record that a publish
+# stage COMPLETED (the .pom is written last by maven-publish, so an
+# interrupted publish leaves it missing and the check fails open -> rebuild).
+# If the artefacts are already in ~/.m2 (restored from the deps cache), the
+# stage's finished output exists and the build is skipped — we never rebuild
+# the same thing when nothing changed.
+M2="$HOME/.m2/repository"
+
+gmscore_published() {
+    local V=0.3.16.252432 m
+    for m in play-services-ads-identifier play-services-base play-services-basement play-services-fido play-services-tasks; do
+        [ -f "$M2/org/microg/gms/$m/$V/$m-$V.aar" ] || return 1
+    done
+    return 0
+}
+
+glean_published() {  # $1 = version dir (68.0.1 for glean, 68.0.0 for glean_as)
+    local V="$1"
+    [ -f "$M2/org/mozilla/telemetry/glean/$V/glean-$V.aar" ] || return 1
+    [ -f "$M2/org/mozilla/telemetry/glean-native/$V/glean-native-$V.aar" ] || return 1
+    [ -f "$M2/org/mozilla/telemetry/glean-native-forUnitTests/$V/glean-native-forUnitTests-$V.jar" ] || return 1
+    [ -f "$M2/org/mozilla/telemetry/glean-gradle-plugin/$V/glean-gradle-plugin-$V.jar" ] || return 1
+    [ -f "$M2/org/mozilla/telemetry/glean/$V/glean-$V.pom" ] || return 1
+    [ -f "$M2/org/mozilla/telemetry/glean-gradle-plugin/$V/glean-gradle-plugin-$V.pom" ] || return 1
+    return 0
+}
+
 # Build microG libraries
 if run_stage gmscore; then
+if gmscore_published; then
+    echo "gmscore: all 5 AARs already in ~/.m2 (0.3.16.252432) — skipping build"
+else
 pushd "$gmscore"
 gradle -x javaDocReleaseGeneration \
     :play-services-ads-identifier:publishToMavenLocal \
@@ -59,21 +89,30 @@ gradle -x javaDocReleaseGeneration \
     :play-services-tasks:publishToMavenLocal
 popd
 fi
+fi
 
 if run_stage glean; then
+if glean_published 68.0.1; then
+    echo "glean: all artefacts already in ~/.m2 (68.0.1) — skipping build"
+else
 pushd "$glean"
 export TARGET_CFLAGS=-DNDEBUG
 gradle publishToMavenLocal
 popd
 fi
+fi
 
 if run_stage glean_as; then
+if glean_published 68.0.0; then
+    echo "glean_as: all artefacts already in ~/.m2 (68.0.0) — skipping build"
+else
 pushd "$glean_as"
 # (inherits TARGET_CFLAGS from the glean stage; re-set so this stage is also
 # runnable on its own)
 export TARGET_CFLAGS=-DNDEBUG
 gradle publishToMavenLocal
 popd
+fi
 fi
 
 if run_stage gecko || run_stage gecko_build; then
