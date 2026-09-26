@@ -58,6 +58,19 @@ jobs:
         run: |
           echo "=== df (start) ==="; df -h / /home; free -h; nproc
 
+      - name: "DIAGNOSTIC — busy probe (remove after the experiment)"
+        # 30 min of real CPU work (one busy worker per core) at the very
+        # start of the job, before any build happens. Tests whether the
+        # hosted runner terminates the job after a finite job lifetime
+        # regardless of what the job is doing: if the same SIGTERM/143
+        # shutdown-signal signature appears mid-probe, the lifetime
+        # hypothesis holds and the small-step+checkpoint fix is correct;
+        # if the probe COMPLETES 30 min, job lifetime is not the trigger
+        # and the build's own resource use is the suspect.
+        # No log files: the per-30s state lines on the console ARE the record.
+        run: |
+          bash .github/workflows/busy_probe.sh 30
+
       - name: Install build dependencies (mirrors fdroiddata sudo block)
         run: |
           sudo apt-get update
