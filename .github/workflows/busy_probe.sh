@@ -16,13 +16,20 @@ set -u
 MIN="${1:-30}"
 END=$(( $(date +%s) + MIN * 60 ))
 
+# Real memory ceiling of THIS job (cgroup), sampled to the console every 30 s.
+# `free -h` shows host RAM; the runner may enforce a cgroup limit the build
+# can cross without the host-wide numbers ever moving. If the probe dies,
+# these lines show exactly how close memory got to its ceiling.
+bash "$(dirname "$0")/cgroup_watch.sh" 30 &
+WATCH=$!
+
 NCPU=$(nproc)
 PIDS=()
 for _ in $(seq 1 "$NCPU"); do
     yes > /dev/null 2>&1 &
     PIDS+=($!)
 done
-trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done' EXIT
+trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; kill "$WATCH" 2>/dev/null || true' EXIT
 
 echo "busy_probe: start $(date -u +%H:%M:%S) UTC — $NCPU busy workers (pids: ${PIDS[*]}), $MIN min"
 echo "busy_probe: df at start: $(df -h / | tail -1)"

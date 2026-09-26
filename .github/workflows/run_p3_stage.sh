@@ -12,12 +12,19 @@ export STAGES
 WS="$GITHUB_WORKSPACE"
 echo "== [$TAG] start $(date -u +%H:%M:%S) UTC stages='$STAGES' df: $(df -h / | tail -1) =="
 
+# Sample the job's REAL memory ceiling (cgroup) to the console every 60 s.
+# The host-wide `free` never shows a cgroup limit, so without this a build
+# that crosses its own memory ceiling dies with no trace in the log.
+bash "$(dirname "$0")/cgroup_watch.sh" 60 &
+WATCH=$!
+
 # If the runner (or anything else) signals us, say so on STDERR (captured by
 # the console), then re-raise with default disposition so the exit code stays
 # the true one (143 for TERM).
 on_signal() {
     local sig="$1"
     echo "== [$TAG] KILLED by SIG${sig} at $(date -u +%H:%M:%S) UTC (stages='$STAGES') — no build error above this line means the job was interrupted, not failed ==" >&2
+    kill "$WATCH" 2>/dev/null || true
     trap - "$sig"
     kill -s "$sig" $$
 }
@@ -28,5 +35,6 @@ trap 'on_signal HUP'  HUP
 # Output goes straight to the console (STDOUT/STDERR), captured normally.
 bash "$(dirname "$0")/build-rest.sh"
 rc=$?
+kill "$WATCH" 2>/dev/null || true
 echo "== [$TAG] rc=$rc $(date -u +%H:%M:%S) UTC df: $(df -h / | tail -1) =="
 exit "$rc"
