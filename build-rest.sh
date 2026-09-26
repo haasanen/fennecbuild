@@ -36,6 +36,11 @@
 # their state arrives via the checkpoint caches restored at job start:
 # gecko_package needs mach build's obj/, gecko_gv needs the packaged gecko.
 set -e
+# mach is a Python process: its stdout is block-buffered (8 KB) when piped
+# (runner console capture), so on a mid-build SIGTERM the last unflushed
+# chunk — potentially the final errors — is lost. PYTHONUNBUFFERED makes it
+# write every line the moment it is produced.
+export PYTHONUNBUFFERED=1
 source "$(dirname "$0")/paths.sh"
 
 STAGES="${STAGES:-all}"
