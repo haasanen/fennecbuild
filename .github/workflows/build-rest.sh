@@ -43,6 +43,12 @@ set -e
 export PYTHONUNBUFFERED=1
 source "$(dirname "$0")/../../paths.sh"
 
+# $patches in paths.sh is the *sourcing* script's dir (dirname of $0), so from
+# this file in .github/workflows/ it points here, not the repo root. The
+# locales list lives at the repo root; resolve it explicitly so gecko_package /
+# gecko_gv work no matter which sub-stage is invoked.
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+
 STAGES="${STAGES:-all}"
 run_stage() {
     # "all" (or unset) runs everything — the local / F-Droid path.
@@ -138,7 +144,7 @@ fi
 if run_stage gecko || run_stage gecko_package; then
 pushd "$mozilla_release"
 ./mach package
-read -ra locales < "$patches/locales"
+read -ra locales < "$root/locales"
 ./mach package-multi-locale --locales "${locales[@]}"
 popd
 fi
@@ -147,7 +153,7 @@ if run_stage gecko || run_stage gecko_gv; then
 pushd "$mozilla_release"
 # locales list re-read so this sub-stage is runnable on its own (same file
 # the gecko_package sub-stage consumed).
-read -ra locales < "$patches/locales"
+read -ra locales < "$root/locales"
 MOZ_CHROME_MULTILOCALE=${locales[*]}
 export MOZ_CHROME_MULTILOCALE
 gradle -x javadocRelease :geckoview:publishReleasePublicationToMavenLocal
