@@ -176,15 +176,14 @@ fi
 
 if run_stage appservices; then
 pushd "$application_services"
+export ANDROID_NDK_ROOT="$ANDROID_NDK"
+export SQLCIPHER_LIB_DIR="$application_services/libs/desktop/linux-x86-64/sqlcipher/lib"
+export SQLCIPHER_INCLUDE_DIR="$application_services/libs/desktop/linux-x86-64/sqlcipher/include"
 export NSS_DIR="$application_services/libs/desktop/linux-x86-64/nss"
 export NSS_STATIC=1
+./libs/verify-desktop-environment.sh
 ./libs/verify-android-environment.sh
 gradle publishToMavenLocal
-# Build and install nimbus-fml manually
-pushd components/support/nimbus-fml
-cargo build --release
-popd
-mv target/release/nimbus-fml "$mozilla_release/obj/dist/host/bin/nimbus-fml"
 popd
 fi
 
