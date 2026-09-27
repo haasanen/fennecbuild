@@ -500,18 +500,33 @@ jobs:
         with:
           path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
           key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-prec
+      - name: "P3b1.4 — stop Gradle daemons again (free RAM for rust codegen)"
+        # pre-export/export/pre-compile start fresh gradle daemons (java at
+        # ~3 GiB by the time binaries starts in run 36279268007). The rust
+        # tiers need none of them — stop them right before the peak.
+        run: |
+          before=$(ps -eo rss=,comm= 2>/dev/null | awk '$2=="java"{s+=$1} END{printf "%dMiB", s/1024}')
+          echo "java RSS before: ${before:-0MiB}"
+          gradle --stop 2>/dev/null || true
+          for p in $(pgrep -f "GradleDaemon" 2>/dev/null); do
+            kill "$p" 2>/dev/null || true
+          done
+          sleep 5
+          after=$(ps -eo rss=,comm= 2>/dev/null | awk '$2=="java"{s+=$1} END{printf "%dMiB", s/1024}')
+          echo "java RSS after: ${after:-0MiB}"
+          free -h | head -2
+
       - name: "P3b1.4 — mach build binaries"
         # Compile and link all C/C++/Rust sources — the long step.
         # No time limit: it runs until every object, crate and binary is built.
-        # -j1 (observe-first, 2026-09-26): the 15 GiB machine saturates at the
-        # geckoservo codegen peak with 4 parallel rustc (run 36276000119:
-        # 14Gi used + full 3Gi swap, 3 rustc alive at 12.3Gi). CARGO_BUILD_JOBS
-        # alone cannot serialize cargo (make jobserver wins, rust.mk) — -j1 on
-        # mach is the real switch. Serial, full quality (codegen-units=1, LTO
-        # untouched); raise only when telemetry shows the peak allows it.
+        # -j2 (2026-09-26): the machine has 15 GiB. With the small-memory
+        # rust patch (no fat LTO, no codegen-units=1) a single rustc peaks at
+        # a few GiB instead of 10.6, so two parallel rustc fit comfortably.
+        # Serial (-j1) was the measurement baseline; raise further only if
+        # the res_watch peak shows headroom.
         env:
           MACH_BUILD_TARGETS: "binaries"
-          MACH_BUILD_JOBS: "1"
+          MACH_BUILD_JOBS: "2"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-bin
 
       - name: "P3b1.4 — save completed obj (bin)"
@@ -525,11 +540,11 @@ jobs:
           key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-bin
       - name: "P3b1.5 — mach build faster"
         # Everything binaries does not cover (JS, XUL, CSS, ...).
-        # -j1: same observe-first rationale as P3b1.4 (any rust not built
-        # fresh in binaries would otherwise run 4-deep under the jobserver).
+        # -j2: matches binaries; the rust is already built there, so this
+        # tier is mostly frontend assets with low memory.
         env:
           MACH_BUILD_TARGETS: "faster"
-          MACH_BUILD_JOBS: "1"
+          MACH_BUILD_JOBS: "2"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-fast
 
       - name: "P3b1.5 — save completed obj (fast)"
