@@ -526,13 +526,28 @@ jobs:
         id: p3b3
         run: bash .github/workflows/run_p3_stage.sh "gecko_gv" p3b3
 
+      - name: "Phase 3c-prep — stop lingering Gradle daemons (free RAM)"
+        run: bash .github/workflows/stop_gradle_daemons.sh
+
       - name: Phase 3c — AppServices (concept-fetch shim, NSS, nimbus-fml)
         id: p3c
         run: bash .github/workflows/run_p3_stage.sh "ac_fetch150 appservices" p3c
 
+      - name: "Phase 3d-prep — stop lingering Gradle daemons (free RAM)"
+        run: bash .github/workflows/stop_gradle_daemons.sh
+
       - name: Phase 3d — UnifiedPush + Android Components
         id: p3d
         run: bash .github/workflows/run_p3_stage.sh "upush ac" p3d
+
+      - name: "Phase 3e-prep — stop lingering Gradle daemons (free RAM)"
+        # 3e is the heaviest gradle build in the pipeline (full Fenix Kotlin
+        # app). Run 36335035837 died in 3e: res_watch showed 4 lingering
+        # daemon JVMs (java 4597+3097+74… MiB), mem 9.6Gi used / 6.1Gi free,
+        # heavy_build=0 (pure daemon bloat), then "runner lost communication
+        # … starves it for CPU/Memory". This is the same fix that saved the
+        # binaries tier — applied at every gradle stage boundary.
+        run: bash .github/workflows/stop_gradle_daemons.sh
 
       - name: Phase 3e — Fenix assembleRelease
         id: p3e
