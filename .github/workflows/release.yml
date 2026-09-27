@@ -335,63 +335,48 @@ jobs:
       # ubuntu-latest runner was recycled mid-phase ("The runner has received a
       # shutdown signal", exit 143) everything after the last cache was lost.
       # It is now five sequential stages (same order as build-rest.sh, via
-      # STAGES= filtering), and EVERY completed stage uploads a checkpoint
-      # cache before the next stage starts. Keys carry run_id + run_attempt +
-      # stage because actions/cache refuses to overwrite an existing key on the
-      # same branch; restore-keys below picks up the most recent checkpoint of
-      # any previous run/attempt, so a re-run resumes from the last completed
-      # stage instead of restarting Phase 3 from zero (already-done stages
-      # re-execute as fast up-to-date no-ops against the restored
-      # obj/target/m2/gradle dirs).
-      - name: Restore phase-3 caches (mavenLocal, gradle home, build dirs)
+      # STAGES= filtering).
+      #
+      # CACHE DESIGN (2026-09-27): STABLE KEYS, saved once, restored forever.
+      # actions/cache entries are IMMUTABLE — a key can never be overwritten —
+      # and the repo has ONE 10 GB budget across all entries with LRU eviction
+      # of the oldest. The old per-run checkpoint keys (run_id+attempt+stage)
+      # wrote ~35 GB per run (six ~5 GB obj snapshots, five ~1.75 GB deps
+      # snapshots), so the toolchains saved early in the run were the ones
+      # evicted every time (runs 36283481652/36301378409: LLVM+WASI re-built
+      # cold each run, ~4.5 h). Now:
+      #   fennec-p3-obj-v1   — obj+target, saved ONCE after the completion
+      #                        gate (the first run to reach it wins; later
+      #                        saves no-op against the immutable key).
+      #   fennec-p3-deps-v1  — m2+gradle, saved ONCE after 3e.
+      # Both fall back to the legacy per-run prefixes on restore, so the
+      # first stable-key run can still pick up a completed state from the
+      # old-era entries. Sources are mtime-pinned on a fixed branch, so a
+      # saved state stays valid until the source changes — then bump the key
+      # suffix (v1 -> v2) to rotate deliberately. Steady-state footprint:
+      # LLVM ~0.6 + WASI ~0.1 + obj ~5.3 + deps < 3.0 ≈ < 9 GB (cap 10 GB).
+      - name: Restore phase-3 caches (mavenLocal, gradle home)
+        id: deps-restore
         uses: actions/cache/restore@v4
         with:
           path: |
             ~/.m2/repository
             ~/.gradle
-          # per-run seed key (never saved) + prefix restore of the newest
-          # checkpoint saved by any earlier run or attempt
-          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-seed
+          key: fennec-p3-deps-v1
           restore-keys: |
             fennec-p3-deps-v1-
             fennec-p3-deps-v1
-
       - name: Restore phase-3 build dirs (incremental compile)
         uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.SRCLIB_DIR }}/MozFennec/obj
             ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          # Separate key (independent 10 GB budget): a build-dir save that
-          # outgrows its limit must not poison the dependency cache. On a hit,
-          # Phase 3 resumes incrementally (Gradle/Rust reuse valid artifacts).
-          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-seed
+          key: fennec-p3-obj-v1
           restore-keys: |
+            fennec-p3-obj-v1
             fennec-p3-build-v1-
             fennec-p3-build-v1
-
-      - name: P3b1 restore latest obj checkpoint
-        # Newest COMPLETED obj/ state of ANY previous run or attempt
-        # (actions/cache returns the most-recently-created cache matching a
-        # restore-key prefix). Saved by the per-step "save completed obj"
-        # steps below when a build step finishes. Older mid-build
-        # checkpoints from the segment era still match the prefix and are
-        # valid incremental states.
-        # MUST list EXACTLY the same path string as the save steps: the
-        # cache 'version' hash is sha256(paths|method|salt) of these
-        # literals.
-        # Runs AFTER the generic build-dirs restore and lays on top of it.
-        # continue-on-error: a corrupt/oversize cached checkpoint must
-        # never hard-kill the job pre-P3a — a bad restore just means the
-        # build starts fresh from the (older) build-dirs restore underneath.
-        continue-on-error: true
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-seed
-          restore-keys: |
-            fennec-p3b1-seg-v1-
-
       - name: Phase 3 heartbeat
         run: |
           bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
@@ -401,24 +386,16 @@ jobs:
         id: p3a
         run: bash .github/workflows/run_p3_stage.sh "gmscore glean glean_as" p3a
 
-      - name: P3a checkpoint — deps
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gradle
-          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-a
-
       # ---- P3b1: the gecko build as logical build steps -------------------
       # mach build's own phases, each one workflow step that runs until it
       # is complete (rc=0) — NO time budgets anywhere: the build decides
-      # when a step is done. When a step completes, its finished obj/ state
-      # is cached (step-boundary actions/cache/save@v4 — the only cache
-      # channel that works on the 2026 hosted runners, where `run:` steps
-      # get NO cache-service env: probe 35944549562). A later attempt
-      # restores the newest completed state, and because the sources are
-      # mtime-pinned, ninja/cargo/autoconf skip every already-built file —
-      # the next run only does the remaining delta.
+      # when a step is done. Only the state AFTER the completion gate is
+      # cached (one stable-key save below); the per-tier saves from the
+      # crash-checkpoint era are gone (they churned ~30 GB/run and evicted
+      # the toolchain caches — see the CACHE DESIGN note above). On a
+      # restore hit every tier re-executes as a fast up-to-date no-op,
+      # because the sources are mtime-pinned and ninja/cargo skip
+      # already-built files.
       #
       # The steps are the tiers mach build itself runs, in order:
       #   1. pre-export   — files generated before export
@@ -427,12 +404,6 @@ jobs:
       #   4. binaries     — compile+link all C/C++/Rust (the long one)
       #   5. faster       — JS/XUL/CSS etc. (complements binaries)
       #   6. (vanilla)    — remaining tiers; the completion gate
-      # Each is idempotent and incremental, so a step whose work is already
-      # in the restored obj/ finishes as a fast skip.
-      #
-      # NOTE: the `path:` in every save step MUST stay byte-identical to
-      # the `P3b1 restore latest obj checkpoint` restore step above — the
-      # cache 'version' hash is computed over the literal path string.
       - name: "P3a.5 — stop lingering Gradle daemons (free RAM for rust codegen)"
         # The P3a gradle builds (gmscore/glean) leave JVM daemons behind:
         # run 36274687731 showed java at 3.1-3.9 GiB still resident when
@@ -461,45 +432,18 @@ jobs:
           MACH_BUILD_TARGETS: "pre-export"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-pe
 
-      - name: "P3b1.1 — save completed obj (pe)"
-        # Finished state of this build step — saved only because the step
-        # above completed (a failure or a reclaim never reaches here).
-        # continue-on-error: a failed/oversize save must not kill a
-        # healthy completed build — the next step proceeds regardless.
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-pe
       - name: "P3b1.2 — mach build export"
         # Generate everything the compile tier needs (JS bundles, headers, ...).
         env:
           MACH_BUILD_TARGETS: "export"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-exp
 
-      - name: "P3b1.2 — save completed obj (exp)"
-        # Finished state of this build step — saved only because the step
-        # above completed (a failure or a reclaim never reaches here).
-        # continue-on-error: a failed/oversize save must not kill a
-        # healthy completed build — the next step proceeds regardless.
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-exp
       - name: "P3b1.3 — mach build pre-compile"
         # Generate everything needed DURING the compile.
         env:
           MACH_BUILD_TARGETS: "pre-compile"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-prec
 
-      - name: "P3b1.3 — save completed obj (prec)"
-        # Finished state of this build step — saved only because the step
-        # above completed (a failure or a reclaim never reaches here).
-        # continue-on-error: a failed/oversize save must not kill a
-        # healthy completed build — the next step proceeds regardless.
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-prec
       - name: "P3b1.4 — stop Gradle daemons again (free RAM for rust codegen)"
         # pre-export/export/pre-compile start fresh gradle daemons (java at
         # ~3 GiB by the time binaries starts in run 36279268007). The rust
@@ -529,15 +473,6 @@ jobs:
           MACH_BUILD_JOBS: "2"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-bin
 
-      - name: "P3b1.4 — save completed obj (bin)"
-        # Finished state of this build step — saved only because the step
-        # above completed (a failure or a reclaim never reaches here).
-        # continue-on-error: a failed/oversize save must not kill a
-        # healthy completed build — the next step proceeds regardless.
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-bin
       - name: "P3b1.5 — mach build faster"
         # Everything binaries does not cover (JS, XUL, CSS, ...).
         # -j2: matches binaries; the rust is already built there, so this
@@ -547,38 +482,41 @@ jobs:
           MACH_BUILD_JOBS: "2"
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-fast
 
-      - name: "P3b1.5 — save completed obj (fast)"
-        # Finished state of this build step — saved only because the step
-        # above completed (a failure or a reclaim never reaches here).
-        # continue-on-error: a failed/oversize save must not kill a
-        # healthy completed build — the next step proceeds regardless.
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-fast
       - name: "P3b1.6 — mach build (completion gate)"
         # Vanilla mach build: remaining tiers (libs, misc, tools, syms)
         # — the gate that proves the whole gecko build is finished.
         run: bash .github/workflows/run_p3_stage.sh "gecko_build" p3b1-done
 
-      - name: "P3b1.6 — save completed obj (done)"
-        # Finished state of this build step — saved only because the step
-        # above completed (a failure or a reclaim never reaches here).
-        # continue-on-error: a failed/oversize save must not kill a
-        # healthy completed build — the next step proceeds regardless.
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.SRCLIB_DIR }}/MozFennec/obj
-          key: fennec-p3b1-seg-v1-${{ github.run_id }}-${{ github.run_attempt }}-done
+      - name: P3b1 obj guard (obj + target < 9 GB)
+        id: ck-obj
+        continue-on-error: true
+        run: bash .github/workflows/ci_p3_guard.sh
 
-
-      - name: P3b1 checkpoint — build dirs (mach build done)
+      - name: Save gecko build dirs (STABLE key, once)
+        # The single most expensive output (~5 GB obj). Saved ONCE under a
+        # stable key: the first run to reach the gate wins, and because
+        # actions/cache keys are immutable + the source is mtime-pinned on a
+        # fixed branch, that state stays valid for every later run until the
+        # source changes (then bump v1 -> v2). The AppServices target dir is
+        # empty here (built in 3c) but is listed so the path/version hash
+        # matches the restore exactly. continue-on-error: after the key
+        # exists, every later save is a harmless no-op collision.
+        #
+        # WHY THE GATE (not 3c/3e): with one immutable key the save sits at
+        # the boundary that minimizes worst-case redo given today's risk.
+        # 3c (AppServices, 2-4 h) is the highest-risk stage right now; a
+        # gate save means a 3c failure re-does only 3b2/3b3 (~10 min) + 3c,
+        # never the 2 h gecko build. Once 3c/3d/3e are all proven, promote
+        # this save to AFTER 3e (then even 3c becomes a no-op on re-runs)
+        # — and bump the key suffix (v1 -> v2) at that moment.
+        if: steps.ck-obj.conclusion == 'success'
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ env.SRCLIB_DIR }}/MozFennec/obj
             ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-b1
+          key: fennec-p3-obj-v1
 
       - name: Phase 3b2 — Gecko package + package-multi-locale
         id: p3b2
@@ -588,91 +526,32 @@ jobs:
         id: p3b3
         run: bash .github/workflows/run_p3_stage.sh "gecko_gv" p3b3
 
-      - name: P3b checkpoint guard (build dirs < 9 GB)
-        id: ck-b
-        continue-on-error: true
-        run: bash .github/workflows/ci_p3_guard.sh
-
-      - name: P3b checkpoint — deps
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gradle
-          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-b
-
-      - name: P3b checkpoint — build dirs
-        if: steps.ck-b.conclusion == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ env.SRCLIB_DIR }}/MozFennec/obj
-            ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-b
-
       - name: Phase 3c — AppServices (concept-fetch shim, NSS, nimbus-fml)
         id: p3c
         run: bash .github/workflows/run_p3_stage.sh "ac_fetch150 appservices" p3c
-
-      - name: P3c checkpoint guard (build dirs < 9 GB)
-        id: ck-c
-        continue-on-error: true
-        run: bash .github/workflows/ci_p3_guard.sh
-
-      - name: P3c checkpoint — deps
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gradle
-          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-c
-
-      - name: P3c checkpoint — build dirs
-        if: steps.ck-c.conclusion == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ env.SRCLIB_DIR }}/MozFennec/obj
-            ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-c
 
       - name: Phase 3d — UnifiedPush + Android Components
         id: p3d
         run: bash .github/workflows/run_p3_stage.sh "upush ac" p3d
 
-      - name: P3d checkpoint — deps
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gradle
-          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-d
-
       - name: Phase 3e — Fenix assembleRelease
         id: p3e
         run: bash .github/workflows/run_p3_stage.sh "fenix" p3e
 
-      - name: P3e checkpoint guard (build dirs < 9 GB)
-        id: ck-e
+      - name: Save deps dirs (STABLE key, once)
+        # mavenLocal + gradle home AFTER the final publish stage: the
+        # complete superset of everything 3a-3e published. Same stable-key
+        # pattern as the obj save above: first run to reach here wins,
+        # later saves no-op against the immutable key. The obj/target dirs
+        # are NOT included here (separate fennec-p3-obj-v1 key) so a big
+        # obj save can't displace this one's budget.
         continue-on-error: true
-        run: bash .github/workflows/ci_p3_guard.sh
-
-      - name: P3e checkpoint — deps
         uses: actions/cache/save@v4
         with:
           path: |
             ~/.m2/repository
             ~/.gradle
-          key: fennec-p3-deps-v1-${{ github.run_id }}-${{ github.run_attempt }}-e
-
-      - name: P3e checkpoint — build dirs
-        if: steps.ck-e.conclusion == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ env.SRCLIB_DIR }}/MozFennec/obj
-            ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-build-v1-${{ github.run_id }}-${{ github.run_attempt }}-e
+          key: fennec-p3-deps-v1
 
       - name: Stop Phase 3 heartbeat
         if: always()
