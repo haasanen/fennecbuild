@@ -183,6 +183,18 @@ export NSS_DIR="$application_services/libs/desktop/linux-x86-64/nss"
 export NSS_STATIC=1
 ./libs/verify-desktop-environment.sh
 ./libs/verify-android-environment.sh
+# GitHub Actions sets CI=true, and upstream's verify-android-ci-environment.sh
+# only builds the android NSS when CI is UNSET (F-Droid's CI downloads
+# prebuilt android libs instead). Building from source here, so do the build
+# the verify script skips: the standard `build-all.sh android` command, which
+# is a no-op for any arch whose libs/android/<abi>/nss dir already exists.
+# The megazord links this for arm64 (Fennec is single-ABI arm64-v8a).
+if [ ! -d "$application_services/libs/android/arm64-v8a/nss" ]; then
+  echo "=== building android NSS (verify script skipped it under CI) ==="
+  pushd "$application_services/libs"
+  ./build-all.sh android
+  popd
+fi
 gradle publishToMavenLocal
 popd
 fi
