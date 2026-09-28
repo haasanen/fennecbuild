@@ -887,6 +887,8 @@ index 85a42de77b1230084a2b26c7fd8f6115b9c03203..a4c9f5e319a7ad1a1d5ac7794e002e47
      final JSONArray array = WebAuthnUtils.getJSONTransportsForByte(transports);
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 @@ -0,0 +1,319 @@
 +/*
 + * Copyright (c) 2026 haasanen
@@ -1209,6 +1211,8 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
 new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
 @@ -0,0 +1,30 @@
 +/*
 + * Copyright (c) 2026 haasanen
@@ -1242,6 +1246,8 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
 new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
 @@ -0,0 +1,40 @@
 +/*
 + * Copyright (c) 2026 haasanen
@@ -1285,6 +1291,8 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 @@ -0,0 +1,272 @@
 +/*
 + * Copyright (c) 2026 haasanen
@@ -1560,6 +1568,8 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 @@ -0,0 +1,434 @@
 +/*
 + * Copyright (c) 2026 haasanen
@@ -1997,6 +2007,8 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 @@ -0,0 +1,800 @@
 +/*
 + * Copyright (c) 2026 haasanen
