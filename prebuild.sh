@@ -231,9 +231,16 @@ apply_patch "$patches/gecko-dependencies.patch"
 # Remove Mozilla repositories substitution and explicitly add the required ones
 apply_patch "$patches/gecko-localize_maven.patch"
 
-# Replace GMS with microG client library
+# Replace GMS with the microG client library (upstream patches), then move to
+# in-process FIDO2/WebAuthn security keys (CTAP2 over USB/NFC — no FIDO
+# service on the device) and drop the microG/GMS residue.
 apply_patch "$patches/m-c-liberate.patch"
 apply_patch "$patches/gecko-liberate.patch"
+# In-process FIDO2/WebAuthn security keys: CTAP2 over USB/NFC, no FIDO service
+# (works on GMS-free devices such as GrapheneOS). Replaces the
+# play-services-fido client binding above; the CBOR codec (com.upokecenter:cbor)
+# is published to mavenLocal by the 'cbor' phase-3 stage.
+apply_patch "$patches/gecko-security-key.patch"
 
 # Prevent websites from being able to detect that a user is using Fennec F-Droid
 ## (based on the presence of resources used by `about:crashes`)
@@ -259,6 +266,13 @@ apply_patch "$unifiedpush_ac/patches/fenix-unifiedpush.patch"
 # Patch the use of proprietary and tracking libraries
 apply_patch "$patches/a-c-liberate.patch"
 apply_patch "$patches/fenix-liberate.patch"
+# Full GMS/microG removal: the CTAP2 port above replaced the FIDO service
+# binding, so drop the last org.microg consumers (Adjust ads-id, the
+# integrity stub's play-services-tasks), the inert GMS oss-licenses plugin,
+# and take the integrity module out of the AC build graph (nothing in this
+# build references it — a-c-liberate removed the code seam, fenix-liberate
+# the app-level dependency).
+apply_patch "$patches/gms-free.patch"
 
 # Disable search engines configuration fetching from a Mozilla server
 apply_patch "$patches/fenix-disable-remote-search-configuration.patch"

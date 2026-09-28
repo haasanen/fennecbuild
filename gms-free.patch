@@ -1,0 +1,107 @@
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+index 2e5436898c..17b94baf79 100644
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -62,7 +62,6 @@ accompanist = "0.37.3"
+ ksp = "2.3.11"
+ material = "1.14.0"
+ mlkit-prompt = "1.0.0-beta4"
+-osslicenses-plugin = "0.13.0"
+ protobuf = "4.35.1"
+ 
+ # Gradle plugins
+@@ -110,7 +109,6 @@ jna = "5.19.1"
+ json = "20260719"
+ jsoup = "1.23.1"
+ lottie = "6.7.1"
+-microg = "0.3.16.252432"
+ okhttp = "5.4.0"
+ okio = "3.18.1"
+ sentry = "8.52.0"
+@@ -232,9 +230,6 @@ ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol
+ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
+ ksp-symbol-processing-common-deps = { module = "com.google.devtools.ksp:symbol-processing-common-deps", version.ref = "ksp" }
+ mlkit-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkit-prompt" }
+-osslicenses-plugin = { module = "com.google.android.gms:oss-licenses-plugin", version.ref = "osslicenses-plugin" }
+-play-services-ads-id = { module = "org.microg.gms:play-services-ads-identifier", version.ref = "microg" }
+-play-services-tasks = { module = "org.microg.gms:play-services-tasks", version.ref = "microg" }
+ protobuf-compiler = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
+ protobuf-javalite = { module = "com.google.protobuf:protobuf-javalite", version.ref = "protobuf" }
+ 
+diff --git a/mobile/android/android-components/.buildconfig.yml b/mobile/android/android-components/.buildconfig.yml
+index b4178d6fd6..3a48928be0 100644
+--- a/mobile/android/android-components/.buildconfig.yml
++++ b/mobile/android/android-components/.buildconfig.yml
+@@ -1163,7 +1163,6 @@ projects:
+     - components:feature-session
+     - components:feature-tabs
+     - components:lib-dataprotect
+-    - components:lib-integrity-googleplay
+     - components:lib-publicsuffixlist
+     - components:lib-state
+     - components:service-firefox-accounts
+@@ -2076,18 +2075,6 @@ projects:
+     - components:support-test
+     - components:tooling-fetch-tests
+     - components:tooling-lint
+-  components:lib-integrity-googleplay:
+-    description: A library for verifying the integrity of an installation using Google
+-      Play
+-    path: components/lib/integrity-googleplay
+-    publish: true
+-    upstream_dependencies:
+-    - components:concept-base
+-    - components:concept-fetch
+-    - components:concept-integrity
+-    - components:support-base
+-    - components:support-test
+-    - components:tooling-lint
+   components:lib-jexl:
+     description: 'Javascript Expression Language: Powerful context-based expression
+       parser and evaluator.'
+diff --git a/mobile/android/android-components/components/feature/ipprotection/build.gradle b/mobile/android/android-components/components/feature/ipprotection/build.gradle
+index 8abb50dae2..bae03858c8 100644
+--- a/mobile/android/android-components/components/feature/ipprotection/build.gradle
++++ b/mobile/android/android-components/components/feature/ipprotection/build.gradle
+@@ -24,7 +24,6 @@ dependencies {
+     implementation project(':components:concept-integrity')
+     implementation project(':components:concept-sync')
+     implementation project(':components:feature-tabs')
+-    implementation project(':components:lib-integrity-googleplay')
+     implementation project(':components:lib-state')
+     implementation project(':components:service-firefox-accounts')
+     implementation project(':components:support-base')
+diff --git a/mobile/android/fenix/app/build.gradle b/mobile/android/fenix/app/build.gradle
+index e04de64816..988e9956db 100644
+--- a/mobile/android/fenix/app/build.gradle
++++ b/mobile/android/fenix/app/build.gradle
+@@ -22,9 +22,6 @@ plugins {
+ 
+ // The OSS-licenses plugin is only needed for shipping builds, so skip it during
+ // `mach lint` (which always passes `-Pandroid-lint`) to avoid unnecessary overhead.
+-if (gradle.mozconfig.substs.MOZILLA_OFFICIAL && !project.hasProperty('android-lint')) {
+-    apply plugin: 'com.google.android.gms.oss-licenses-plugin'
+-}
+ 
+ apply from: 'benchmark.gradle'
+ 
+@@ -602,7 +599,6 @@ dependencies {
+     implementation libs.kotlinx.coroutines
+     implementation libs.kotlinx.serialization.json
+     implementation libs.mozilla.glean
+-    implementation libs.play.services.ads.id
+     implementation libs.protobuf.javalite
+     implementation libs.sentry
+     implementation libs.androidx.documentfile
+diff --git a/mobile/android/fenix/build.gradle b/mobile/android/fenix/build.gradle
+index 64f9052305..c80897284b 100644
+--- a/mobile/android/fenix/build.gradle
++++ b/mobile/android/fenix/build.gradle
+@@ -11,7 +11,6 @@ buildscript {
+         classpath libs.androidx.benchmark.gradle
+         classpath libs.androidx.navigation.safeargs
+         classpath libs.mozilla.glean.gradle.plugin
+-        classpath libs.osslicenses.plugin
+ 
+         // NOTE: Do not place your application dependencies here; they belong
+         // in the individual module build.gradle files

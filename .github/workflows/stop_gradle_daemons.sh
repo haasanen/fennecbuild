@@ -1,7 +1,7 @@
 #!/bin/bash
 # stop_gradle_daemons.sh — free RAM held by lingering Gradle daemon JVMs.
 #
-# Why: each gradle version in this build (8.13 gmscore, 8.14.3 glean/app-services,
+# Why: each gradle version in this build (8.14.3 glean/app-services,
 # 9.7.0 in-tree geckoview/fenix) runs its OWN daemon JVM, and daemons outlive
 # the stage that started them. By Phase 3e (Fenix assembleRelease) three daemons
 # were resident (~4.6+3.1+0.7 GiB, run 36335035837 res_watch) leaving <6 GiB

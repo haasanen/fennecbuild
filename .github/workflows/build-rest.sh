@@ -21,7 +21,7 @@
 # build-llvm.sh / build-wasi.sh.
 #
 # STAGES: whitespace-separated subset of
-#   gmscore glean glean_as gecko gecko_build gecko_package gecko_gv
+#   cbor glean glean_as gecko gecko_build gecko_package gecko_gv
 #   ac_fetch150 appservices upush ac fenix
 # selects which blocks run (CI runs one slice per step so a shared-runner
 # recycle can be survived: each completed slice checkpoints its caches, and
@@ -67,14 +67,6 @@ run_stage() {
 # the same thing when nothing changed.
 M2="$HOME/.m2/repository"
 
-gmscore_published() {
-    local V=0.3.16.252432 m
-    for m in play-services-ads-identifier play-services-base play-services-basement play-services-fido play-services-tasks; do
-        [ -f "$M2/org/microg/gms/$m/$V/$m-$V.aar" ] || return 1
-    done
-    return 0
-}
-
 glean_published() {  # $1 = version dir (68.0.1 for glean, 68.0.0 for glean_as)
     local V="$1"
     [ -f "$M2/org/mozilla/telemetry/glean/$V/glean-$V.aar" ] || return 1
@@ -87,18 +79,15 @@ glean_published() {  # $1 = version dir (68.0.1 for glean, 68.0.0 for glean_as)
 }
 
 # Build microG libraries
-if run_stage gmscore; then
-if gmscore_published; then
-    echo "gmscore: all 5 AARs already in ~/.m2 (0.3.16.252432) — skipping build"
+# (removed: GmsCore is no longer cloned or built — the CTAP2 in-process
+# stack replaced the play-services-fido client binding, and gms-free.patch
+# dropped the last org.microg consumers. The CBOR codec the stack needs is
+# published by the 'cbor' stage below.)
+if run_stage cbor; then
+if [ -f "$M2/com/upokecenter/cbor/4.5.6/cbor-4.5.6.pom" ]; then
+    echo "cbor: com.upokecenter:cbor already in ~/.m2 — skipping publish"
 else
-pushd "$gmscore"
-gradle -x javaDocReleaseGeneration \
-    :play-services-ads-identifier:publishToMavenLocal \
-    :play-services-base:publishToMavenLocal \
-    :play-services-basement:publishToMavenLocal \
-    :play-services-fido:publishToMavenLocal \
-    :play-services-tasks:publishToMavenLocal
-popd
+bash "$(dirname "$0")/publish-cbor-mavenlocal.sh"
 fi
 fi
 
