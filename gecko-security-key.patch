@@ -1,0 +1,2800 @@
+diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
+index 0000000..1111111 100644
+--- a/mobile/android/geckoview/build.gradle
++++ b/mobile/android/geckoview/build.gradle
+@@ -194,7 +194,7 @@
+     implementation libs.androidx.core
+     implementation libs.androidx.lifecycle.common
+     implementation libs.androidx.lifecycle.process
+-    implementation "org.microg.gms:play-services-fido:0.3.16.252432"
++    implementation libs.cbor
+     implementation "org.yaml:snakeyaml:2.2"
+ 
+     if (mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+index 0000000..1111111 100644
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -3,6 +3,10 @@
+ android-gradle-plugin = "9.2.1" # Keep lint version in sync
+ android-lint = "32.2.1"
+ 
++# CBOR (RFC 8949) for the in-process CTAP2 security-key stack (upokecenter;
++# transitive deps: com.github.peteroupc:datautilities, :numbers)
++cbor = "4.5.6"
++
+ # Kotlin
+ coroutines = "1.11.0"
+ kotlin = "2.4.10"
+@@ -221,6 +225,7 @@
+ 
+ # Google other
+ accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
++cbor = { module = "com.upokecenter:cbor", version.ref = "cbor" }
+ google-material = { module = "com.google.android.material:material", version.ref = "material" }
+ ksp-symbol-processing-aa = { module = "com.google.devtools.ksp:symbol-processing-aa", version.ref = "ksp" }
+ ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "ksp" }
+diff --git a/mobile/android/geckoview/src/main/AndroidManifest.xml b/mobile/android/geckoview/src/main/AndroidManifest.xml
+index 0000000..1111111 100644
+--- a/mobile/android/geckoview/src/main/AndroidManifest.xml
++++ b/mobile/android/geckoview/src/main/AndroidManifest.xml
+@@ -10,6 +10,8 @@
+     <uses-permission android:name="android.permission.INTERNET"/>
+     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
++    <!-- Security Key (FIDO2/WebAuthn) over NFC: required=false so devices without NFC can still install. -->
++    <uses-permission android:name="android.permission.NFC" />
+ 
+     <uses-feature
+             android:name="android.hardware.location"
+@@ -23,6 +25,13 @@
+     <uses-feature
+             android:name="android.hardware.camera"
+             android:required="false"/>
++    <!-- Security Key (FIDO2/WebAuthn) over USB: optional, keeps the app installable without USB host. -->
++    <uses-feature
++            android:name="android.hardware.usb.host"
++            android:required="false"/>
++    <uses-feature
++            android:name="android.hardware.nfc"
++            android:required="false"/>
+     <uses-feature
+             android:name="android.hardware.camera.autofocus"
+             android:required="false"/>
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
+index 0000000..1111111 100644
+--- a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
+@@ -5,48 +5,18 @@
+ package org.mozilla.geckoview;
+ 
+ import android.annotation.SuppressLint;
+-import android.app.PendingIntent;
+-import android.net.Uri;
++import android.content.pm.PackageManager;
+ import android.os.Build;
+ import android.util.Log;
+ import androidx.annotation.UiThread;
+-import com.google.android.gms.fido.Fido;
+-import com.google.android.gms.fido.fido2.Fido2ApiClient;
+-import com.google.android.gms.fido.fido2.Fido2PrivilegedApiClient;
+-import com.google.android.gms.fido.fido2.api.common.Algorithm;
+-import com.google.android.gms.fido.fido2.api.common.Attachment;
+-import com.google.android.gms.fido.fido2.api.common.AttestationConveyancePreference;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensions;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensionsClientOutputs;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensionsCredPropsOutputs;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorAssertionResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorAttestationResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorErrorResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorSelectionCriteria;
+-import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialCreationOptions;
+-import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialRequestOptions;
+-import com.google.android.gms.fido.fido2.api.common.EC2Algorithm;
+-import com.google.android.gms.fido.fido2.api.common.FidoAppIdExtension;
+-import com.google.android.gms.fido.fido2.api.common.FidoCredentialDetails;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredential;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialCreationOptions;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialDescriptor;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialParameters;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRequestOptions;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRpEntity;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialType;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialUserEntity;
+-import com.google.android.gms.fido.fido2.api.common.RSAAlgorithm;
+-import com.google.android.gms.fido.fido2.api.common.ResidentKeyRequirement;
+-import com.google.android.gms.tasks.Task;
+ import java.nio.ByteBuffer;
+ import java.util.ArrayList;
+-import java.util.Arrays;
+ import java.util.List;
+ import org.mozilla.gecko.GeckoAppShell;
+ import org.mozilla.gecko.WebAuthnCredentialManager;
+ import org.mozilla.gecko.annotation.WrapForJNI;
++import org.mozilla.gecko.ctap2.Ctap2Cbor;
++import org.mozilla.gecko.ctap2.WebAuthnCtap2;
+ import org.mozilla.gecko.util.GeckoBundle;
+ import org.mozilla.gecko.util.ThreadUtils;
+ import org.mozilla.gecko.util.WebAuthnUtils;
+@@ -55,243 +25,85 @@
+   private static final String LOGTAG = "WebAuthnTokenManager";
+   private static final boolean DEBUG = false;
+ 
+-  private static final Algorithm[] SUPPORTED_ALGORITHMS = {
+-    EC2Algorithm.ES256,
+-    EC2Algorithm.ES384,
+-    EC2Algorithm.ES512,
+-    EC2Algorithm.ED256, /* no ED384 */
+-    EC2Algorithm.ED512,
+-    RSAAlgorithm.PS256,
+-    RSAAlgorithm.PS384,
+-    RSAAlgorithm.PS512,
+-    RSAAlgorithm.RS256,
+-    RSAAlgorithm.RS384,
+-    RSAAlgorithm.RS512
+-  };
++  // Fallback when the relying party sends no pubKeyCredParams: ES256 (CTAP2 defaults).
++  private static final int[] DEFAULT_COSE_ALGS = {-7};
+ 
+-  private static PublicKeyCredentialCreationOptions getRequestOptionsForMakeCredential(
++  @UiThread
++  private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredentialWithCtap2(
+       final GeckoBundle credentialBundle,
+       final byte[] userId,
+-      final byte[] challenge,
+       final WebAuthnUtils.WebAuthnPublicCredential[] excludeList,
+       final GeckoBundle authenticatorSelection,
+-      final GeckoBundle extensions) {
+-    final PublicKeyCredentialCreationOptions.Builder requestBuilder =
+-        new PublicKeyCredentialCreationOptions.Builder();
+-
+-    final List<PublicKeyCredentialParameters> params =
+-        new ArrayList<PublicKeyCredentialParameters>();
+-
+-    // WebAuthn supports more algorithms
+-    for (final Algorithm algo : SUPPORTED_ALGORITHMS) {
+-      params.add(
+-          new PublicKeyCredentialParameters(
+-              PublicKeyCredentialType.PUBLIC_KEY.toString(), algo.getAlgoValue()));
++      final GeckoBundle extensions,
++      final int[] algs,
++      final byte[] clientDataHashBytes) {
++    ThreadUtils.assertOnUiThread();
++
++    final GeckoBundle rpBundle = credentialBundle.getBundle("rp");
++    if (rpBundle == null) {
++      return GeckoResult.fromException(new WebAuthnUtils.Exception("DATA_ERR"));
+     }
++    final String rpId = rpBundle.getString("id", "");
++    final String rpName = rpBundle.getString("name", "");
+ 
++    String userName = "";
++    String userDisplayName = "";
+     final GeckoBundle userBundle = credentialBundle.getBundle("user");
+-    final PublicKeyCredentialUserEntity user =
+-        new PublicKeyCredentialUserEntity(
+-            userId,
+-            userBundle.getString("name", ""),
+-            /* deprecated userIcon field */ "",
+-            userBundle.getString("displayName", ""));
+-
+-    AttestationConveyancePreference pref = AttestationConveyancePreference.NONE;
+-    final String attestationPreference = credentialBundle.getString("attestation", "NONE");
+-    if (attestationPreference.equalsIgnoreCase(AttestationConveyancePreference.DIRECT.name())) {
+-      pref = AttestationConveyancePreference.DIRECT;
+-    } else if (attestationPreference.equalsIgnoreCase(
+-        AttestationConveyancePreference.INDIRECT.name())) {
+-      pref = AttestationConveyancePreference.INDIRECT;
+-    }
+-
+-    final AuthenticatorSelectionCriteria.Builder selBuild =
+-        new AuthenticatorSelectionCriteria.Builder();
+-    final String authenticatorAttachment =
+-        authenticatorSelection.getString("authenticatorAttachment", "");
+-    if (authenticatorAttachment.equals("platform")) {
+-      selBuild.setAttachment(Attachment.PLATFORM);
+-    } else if (authenticatorAttachment.equals("cross-platform")) {
+-      selBuild.setAttachment(Attachment.CROSS_PLATFORM);
++    if (userBundle != null) {
++      userName = userBundle.getString("name", "");
++      userDisplayName = userBundle.getString("displayName", "");
+     }
+-    final String residentKey = authenticatorSelection.getString("residentKey", "");
+-    if (residentKey.equals("required")) {
+-      selBuild
+-          .setRequireResidentKey(true)
+-          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_REQUIRED);
+-    } else if (residentKey.equals("preferred")) {
+-      selBuild
+-          .setRequireResidentKey(false)
+-          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_PREFERRED);
+-    } else if (residentKey.equals("discouraged")) {
+-      selBuild
+-          .setRequireResidentKey(false)
+-          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_DISCOURAGED);
+-    }
+-    final AuthenticatorSelectionCriteria sel = selBuild.build();
+ 
+-    final AuthenticationExtensions.Builder extBuilder = new AuthenticationExtensions.Builder();
+-    if (extensions.containsKey("fidoAppId")) {
+-      extBuilder.setFido2Extension(new FidoAppIdExtension(extensions.getString("fidoAppId")));
++    final List<Ctap2Cbor.PublicKeyCredParam> pubKeyCredParams =
++        new ArrayList<Ctap2Cbor.PublicKeyCredParam>();
++    if (algs != null) {
++      for (final int alg : algs) {
++        pubKeyCredParams.add(new Ctap2Cbor.PublicKeyCredParam(alg));
++      }
++    }
++    if (pubKeyCredParams.isEmpty()) {
++      for (final int alg : DEFAULT_COSE_ALGS) {
++        pubKeyCredParams.add(new Ctap2Cbor.PublicKeyCredParam(alg));
++      }
+     }
+-    final AuthenticationExtensions ext = extBuilder.build();
+-
+-    // userVerification are not yet consumed by Android's FIDO API
+ 
+-    final List<PublicKeyCredentialDescriptor> excludedList =
+-        new ArrayList<PublicKeyCredentialDescriptor>();
++    final List<Ctap2Cbor.CredentialId> excludeIds = new ArrayList<Ctap2Cbor.CredentialId>();
+     for (final WebAuthnUtils.WebAuthnPublicCredential cred : excludeList) {
+-      excludedList.add(
+-          new PublicKeyCredentialDescriptor(
+-              PublicKeyCredentialType.PUBLIC_KEY.toString(),
+-              cred.id,
+-              WebAuthnUtils.getTransportsForByte(cred.transports)));
++      excludeIds.add(new Ctap2Cbor.CredentialId(cred.id));
+     }
+ 
+-    final GeckoBundle rpBundle = credentialBundle.getBundle("rp");
+-    final PublicKeyCredentialRpEntity rp =
+-        new PublicKeyCredentialRpEntity(
+-            rpBundle.getString("id"),
+-            rpBundle.getString("name", ""),
+-            /* deprecated rpIcon field */ "");
+-
+-    return requestBuilder
+-        .setUser(user)
+-        .setAttestationConveyancePreference(pref)
+-        .setAuthenticatorSelection(sel)
+-        .setAuthenticationExtensions(ext)
+-        .setChallenge(challenge)
+-        .setRp(rp)
+-        .setParameters(params)
+-        .setTimeoutSeconds(credentialBundle.getLong("timeout") / 1000.0)
+-        .setExcludeList(excludedList)
+-        .build();
+-  }
+-
+-  @UiThread
+-  private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredential(
+-      final GeckoBundle credentialBundle,
+-      final byte[] userId,
+-      final byte[] challenge,
+-      final WebAuthnUtils.WebAuthnPublicCredential[] excludeList,
+-      final GeckoBundle authenticatorSelection,
+-      final GeckoBundle extensions) {
+-    ThreadUtils.assertOnUiThread();
+-
+-    if (!credentialBundle.containsKey("isWebAuthn")) {
+-      // FIDO U2F not supported by Android (for us anyway) at this time
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
+-    }
++    // "required" only: rk is an authenticator option a plain security key may reject as
++    // unsupported, so it is sent only when the relying party insists on a resident credential.
++    // (authSelBundle only carries "residentKey" when the RP asked credProps and the
++    // geckoview residentkey pref is on — see AndroidWebAuthnService::MakeCredential.)
++    final boolean hasResidentKeyOption = authenticatorSelection.containsKey("residentKey");
++    final String residentKey = authenticatorSelection.getString("residentKey", "");
++    final boolean residentKeyRequested = "required".equals(residentKey);
+ 
+-    final GeckoResult<WebAuthnUtils.MakeCredentialResponse> result = new GeckoResult<>();
+-    try {
+-      final PublicKeyCredentialCreationOptions requestOptions =
+-          getRequestOptionsForMakeCredential(
+-              credentialBundle, userId, challenge, excludeList, authenticatorSelection, extensions);
+-
+-      final Uri origin = Uri.parse(credentialBundle.getString("origin"));
+-
+-      final BrowserPublicKeyCredentialCreationOptions browserOptions =
+-          new BrowserPublicKeyCredentialCreationOptions.Builder()
+-              .setPublicKeyCredentialCreationOptions(requestOptions)
+-              .setOrigin(origin)
+-              .build();
+-
+-      final Task<PendingIntent> intentTask;
+-
+-      // The privileged FIDO2 API normally is restricted to apps with package
+-      // names and signatures that Google knows to be a browser. microG does not
+-      // have such a list, instead it asks the user to confirm that the app doing
+-      // the request is indeed a browser app (only for the first request from
+-      // that app).
+-      final Fido2PrivilegedApiClient fidoClient =
+-          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-      intentTask = fidoClient.getRegisterPendingIntent(browserOptions);
+-
+-      intentTask.addOnSuccessListener(
+-          pendingIntent -> {
+-            GeckoRuntime.getInstance()
+-                .startActivityForResult(pendingIntent)
+-                .accept(
+-                    intent -> {
+-                      if (!intent.hasExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA)) {
+-                        Log.w(LOGTAG, "Failed to get credential data in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-                      final byte[] rspData =
+-                          intent.getByteArrayExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA);
+-                      final PublicKeyCredential publicKeyCredentialData =
+-                          PublicKeyCredential.deserializeFromBytes(rspData);
+-
+-                      final AuthenticatorResponse response = publicKeyCredentialData.getResponse();
+-                      final WebAuthnUtils.Exception error = parseErrorResponse(response);
+-                      if (error != null) {
+-                        result.completeExceptionally(error);
+-                        return;
+-                      }
+-
+-                      if (!(response instanceof AuthenticatorAttestationResponse)) {
+-                        Log.w(LOGTAG, "Failed to get attestation response in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-
+-                      final WebAuthnUtils.MakeCredentialResponse.Builder builder =
+-                          new WebAuthnUtils.MakeCredentialResponse.Builder();
+-
+-                      // credProps is optional.
+-                      final AuthenticationExtensionsClientOutputs extensionsClientOutputsData =
+-                          publicKeyCredentialData.getClientExtensionResults();
+-                      if (extensionsClientOutputsData != null) {
+-                        final AuthenticationExtensionsCredPropsOutputs credPropsOutput =
+-                            extensionsClientOutputsData.getCredProps();
+-                        if (credPropsOutput != null) {
+-                          builder.setCredProps(credPropsOutput.getIsDiscoverableCredential());
+-                        }
+-                      }
+-
+-                      final AuthenticatorAttestationResponse responseData =
+-                          (AuthenticatorAttestationResponse) response;
+-                      final WebAuthnUtils.MakeCredentialResponse credentialResponse =
+-                          builder
+-                              .setKeyHandle(publicKeyCredentialData.getRawId())
+-                              .setAuthenticatorAttachment(
+-                                  publicKeyCredentialData.getAuthenticatorAttachment())
+-                              .setClientDataJson(responseData.getClientDataJSON())
+-                              .setAttestationObject(responseData.getAttestationObject())
+-                              .setTransports(responseData.getTransports())
+-                              .build();
+-
+-                      Log.d(LOGTAG, "MakeCredentialResponse: " + credentialResponse.toString());
+-                      result.complete(credentialResponse);
+-                    },
+-                    e -> {
+-                      Log.w(LOGTAG, "Failed to launch activity: ", e);
+-                      result.completeExceptionally(new WebAuthnUtils.Exception("ABORT_ERR"));
+-                    });
+-          });
+-
+-      intentTask.addOnFailureListener(
+-          e -> {
+-            Log.w(LOGTAG, "Failed to get FIDO intent", e);
+-            result.completeExceptionally(new WebAuthnUtils.Exception("ABORT_ERR"));
+-          });
+-    } catch (final java.lang.Exception e) {
+-      // We need to ensure we catch any possible exception here in order to ensure
+-      // that the Promise on the content side is appropriately rejected. In particular,
+-      // we will get `NoClassDefFoundError` if we're running on a device that does not
+-      // have Google Play Services.
+-      Log.w(LOGTAG, "Couldn't make credential", e);
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-    }
+-    return result;
++    // uv is likewise sent only when the relying party requires it; a roaming key without a
++    // local verification gesture fails an unrequested uv=true with CTAP2_ERR_UNSUPPORTED_OPTION.
++    final String userVerification = authenticatorSelection.getString("userVerification", "");
++    final boolean uvRequired = "required".equals(userVerification);
++
++    if (DEBUG) {
++      Log.d(LOGTAG, "CTAP2 makeCredential rp=" + rpId + " algs=" + algs.length);
++    }
++
++    return WebAuthnCtap2.makeCredential(
++        rpId,
++        rpName,
++        userId,
++        userName,
++        userDisplayName,
++        clientDataHashBytes,
++        pubKeyCredParams,
++        excludeIds,
++        residentKeyRequested,
++        uvRequired,
++        hasResidentKeyOption);
+   }
+ 
+-  // ThreadConstraint false positive: runs in a GeckoResult continuation on the UI thread, which
+-  // lint cannot model.
+-  @SuppressLint("ThreadConstraint")
++  @SuppressLint("WrongThread")
+   @WrapForJNI(calledFrom = "gecko")
+   private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> webAuthnMakeCredential(
+       final GeckoBundle credentialBundle,
+@@ -325,173 +137,72 @@
+         new WebAuthnUtils.WebAuthnPublicCredential[idList.length];
+     excludeArrayList.toArray(excludeList);
+ 
++    if (!credentialBundle.containsKey("isWebAuthn")) {
++      // FIDO U2F not supported by Android (for us anyway) at this time
++      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    }
++
+     final GeckoResult<WebAuthnUtils.MakeCredentialResponse> result = new GeckoResult<>();
+ 
+     ThreadUtils.runOnUiThread(
+         () -> {
++          // Credential Manager first: it owns passkeys when a provider is installed.
++          // Without a provider (e.g. a GMS-free OS) it fails NOT_SUPPORTED_ERR and the
++          // roaming security key (CTAP2 over USB/NFC, no external FIDO service) answers.
+           WebAuthnCredentialManager.makeCredential(
+                   credentialBundle.getString("origin"), clientDataHashBytes, requestJSON)
+               .accept(
+                   response -> result.complete(response),
+                   exceptionInCredManager -> {
+-                    if (!exceptionInCredManager.getMessage().equals("NOT_SUPPORTED_ERR")) {
++                    if (exceptionInCredManager == null
++                        || exceptionInCredManager.getMessage() == null
++                        || !exceptionInCredManager
++                            .getMessage()
++                            .equals("NOT_SUPPORTED_ERR")) {
+                       result.completeExceptionally(exceptionInCredManager);
+                       return;
+                     }
+-                    ThreadUtils.runOnUiThread(
+-                        () -> {
+-                          // If supported error, we try to use GMS FIDO2.
+-                          makeCredential(
+-                                  credentialBundle,
+-                                  userBytes,
+-                                  challBytes,
+-                                  excludeList,
+-                                  authenticatorSelection,
+-                                  extensions)
+-                              .accept(
+-                                  response -> result.complete(response),
+-                                  exceptionInGMS -> result.completeExceptionally(exceptionInGMS));
+-                        });
++                    makeCredentialWithCtap2(
++                            credentialBundle,
++                            userBytes,
++                            excludeList,
++                            authenticatorSelection,
++                            extensions,
++                            algs,
++                            clientDataHashBytes)
++                        .accept(
++                            response -> result.complete(response),
++                            exceptionInCtap2 ->
++                                result.completeExceptionally(exceptionInCtap2));
+                   });
+         });
+     return result;
+   }
+ 
+-  private static WebAuthnUtils.Exception parseErrorResponse(final AuthenticatorResponse response) {
+-    if (!(response instanceof AuthenticatorErrorResponse)) {
+-      return null;
+-    }
+-
+-    final AuthenticatorErrorResponse responseData = (AuthenticatorErrorResponse) response;
+-
+-    Log.e(LOGTAG, "errorCode.name: " + responseData.getErrorCode());
+-    Log.e(LOGTAG, "errorMessage: " + responseData.getErrorMessage());
+-
+-    return new WebAuthnUtils.Exception(responseData.getErrorCode().name());
+-  }
+-
+-  private static PublicKeyCredentialRequestOptions getRequestOptionsForGetAssertion(
+-      final byte[] challenge,
++  private static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertionWithCtap2(
+       final WebAuthnUtils.WebAuthnPublicCredential[] allowList,
+       final GeckoBundle assertionBundle,
+-      final GeckoBundle extensions) {
+-    final List<PublicKeyCredentialDescriptor> allowedList =
+-        new ArrayList<PublicKeyCredentialDescriptor>();
+-    for (final WebAuthnUtils.WebAuthnPublicCredential cred : allowList) {
+-      allowedList.add(
+-          new PublicKeyCredentialDescriptor(
+-              PublicKeyCredentialType.PUBLIC_KEY.toString(),
+-              cred.id,
+-              WebAuthnUtils.getTransportsForByte(cred.transports)));
+-    }
++      final GeckoBundle extensions,
++      final byte[] clientDataHashBytes) {
++    final String rpId = assertionBundle.getString("rpId", "");
++    final String userVerification = assertionBundle.getString("userVerification", "");
++    final boolean uvRequired = "required".equals(userVerification);
+ 
+-    final AuthenticationExtensions.Builder extBuilder = new AuthenticationExtensions.Builder();
++    String appId = null;
+     if (extensions.containsKey("fidoAppId")) {
+-      extBuilder.setFido2Extension(new FidoAppIdExtension(extensions.getString("fidoAppId")));
++      appId = extensions.getString("fidoAppId");
+     }
+-    final AuthenticationExtensions ext = extBuilder.build();
+-
+-    return new PublicKeyCredentialRequestOptions.Builder()
+-        .setChallenge(challenge)
+-        .setAllowList(allowedList)
+-        .setTimeoutSeconds(assertionBundle.getLong("timeout") / 1000.0)
+-        .setRpId(assertionBundle.getString("rpId"))
+-        .setAuthenticationExtensions(ext)
+-        .build();
+-  }
+ 
+-  @UiThread
+-  private static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertion(
+-      final byte[] challenge,
+-      final WebAuthnUtils.WebAuthnPublicCredential[] allowList,
+-      final GeckoBundle assertionBundle,
+-      final GeckoBundle extensions) {
+-    ThreadUtils.assertOnUiThread();
+-
+-    if (!assertionBundle.containsKey("isWebAuthn")) {
+-      // FIDO U2F not supported by Android (for us anyway) at this time
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    final List<Ctap2Cbor.CredentialId> allowIds = new ArrayList<Ctap2Cbor.CredentialId>();
++    for (final WebAuthnUtils.WebAuthnPublicCredential cred : allowList) {
++      allowIds.add(new Ctap2Cbor.CredentialId(cred.id));
+     }
+ 
+-    final GeckoResult<WebAuthnUtils.GetAssertionResponse> result = new GeckoResult<>();
+-    try {
+-      final PublicKeyCredentialRequestOptions requestOptions =
+-          getRequestOptionsForGetAssertion(challenge, allowList, assertionBundle, extensions);
+-
+-      final Uri origin = Uri.parse(assertionBundle.getString("origin"));
+-      final BrowserPublicKeyCredentialRequestOptions browserOptions =
+-          new BrowserPublicKeyCredentialRequestOptions.Builder()
+-              .setPublicKeyCredentialRequestOptions(requestOptions)
+-              .setOrigin(origin)
+-              .build();
+-
+-      final Task<PendingIntent> intentTask;
+-      // See the makeCredential method for documentation about the FIDO2 API and
+-      // microG.
+-      final Fido2PrivilegedApiClient fidoClient =
+-          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-
+-      intentTask = fidoClient.getSignPendingIntent(browserOptions);
+-
+-      intentTask.addOnSuccessListener(
+-          pendingIntent -> {
+-            GeckoRuntime.getInstance()
+-                .startActivityForResult(pendingIntent)
+-                .accept(
+-                    intent -> {
+-                      if (!intent.hasExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA)) {
+-                        Log.w(LOGTAG, "Failed to get credential data in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-
+-                      final byte[] rspData =
+-                          intent.getByteArrayExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA);
+-                      final PublicKeyCredential publicKeyCredentialData =
+-                          PublicKeyCredential.deserializeFromBytes(rspData);
+-                      final AuthenticatorResponse response = publicKeyCredentialData.getResponse();
+-
+-                      final WebAuthnUtils.Exception error = parseErrorResponse(response);
+-                      if (error != null) {
+-                        result.completeExceptionally(error);
+-                        return;
+-                      }
+-
+-                      if (!(response instanceof AuthenticatorAssertionResponse)) {
+-                        Log.w(LOGTAG, "Failed to get assertion response in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-
+-                      final AuthenticatorAssertionResponse responseData =
+-                          (AuthenticatorAssertionResponse) response;
+-                      final WebAuthnUtils.GetAssertionResponse assertionResponse =
+-                          new WebAuthnUtils.GetAssertionResponse.Builder()
+-                              .setClientDataJson(responseData.getClientDataJSON())
+-                              .setKeyHandle(publicKeyCredentialData.getRawId())
+-                              .setAuthData(responseData.getAuthenticatorData())
+-                              .setSignature(responseData.getSignature())
+-                              .setUserHandle(responseData.getUserHandle())
+-                              .setAuthenticatorAttachment(
+-                                  publicKeyCredentialData.getAuthenticatorAttachment())
+-                              .build();
+-                      Log.d(LOGTAG, "GetAssertionResponse: " + assertionResponse.toString());
+-                      result.complete(assertionResponse);
+-                    },
+-                    e -> {
+-                      Log.w(LOGTAG, "Failed to get FIDO intent", e);
+-                      result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                    });
+-          });
+-    } catch (final java.lang.Exception e) {
+-      // We need to ensure we catch any possible exception here in order to ensure
+-      // that the Promise on the content side is appropriately rejected. In particular,
+-      // we will get `NoClassDefFoundError` if we're running on a device that does not
+-      // have Google Play Services.
+-      Log.w(LOGTAG, "Couldn't make credential", e);
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++    if (DEBUG) {
++      Log.d(LOGTAG, "CTAP2 getAssertion rp=" + rpId + " allow=" + allowIds.size());
+     }
+-    return result;
++
++    return WebAuthnCtap2.getAssertion(rpId, clientDataHashBytes, allowIds, appId, uvRequired);
+   }
+ 
+   // ThreadConstraint false positive: runs in a GeckoResult continuation on the UI thread, which
+@@ -523,60 +234,66 @@
+         new WebAuthnUtils.WebAuthnPublicCredential[idList.length];
+     allowArrayList.toArray(allowList);
+ 
+-    // Unfortunately, we don't know where requested credential is stored.
++    if (!assertionBundle.containsKey("isWebAuthn")) {
++      // FIDO U2F not supported by Android (for us anyway) at this time
++      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    }
++
++    // Unlike upstream, there is no GMS-backed FIDO service to route through. The flow is:
+     //
+-    // 1. Check whether play service has the credential that is included in allow list.
+-    //    If found, use play service. If not, step 2.
+-    // 2. Try credential manager to get credential.
+-    //    If credential manager doesn't support passkeys, step 3.
+-    // 3. Try play service to get credential.
++    // 1. Credential Manager (Android 14+): if a passkey provider holds a matching credential,
++    //    it answers.
++    // 2. Otherwise the roaming security key answers directly via CTAP2 over USB/NFC, in
++    //    process (no privileged FIDO service, no PendingIntent).
+     final GeckoResult<WebAuthnUtils.GetAssertionResponse> result = new GeckoResult<>();
+ 
+     ThreadUtils.runOnUiThread(
+         () -> {
+-          hasCredentialInGMS(assertionBundle.getString("rpId"), allowList)
++          if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE
++              || !hasCredentialManager()) {
++            // No Credential Manager at all: security key directly.
++            getAssertionWithCtap2(allowList, assertionBundle, extensions, clientDataHashBytes)
++                .accept(
++                    response -> result.complete(response),
++                    e -> result.completeExceptionally(e));
++            return;
++          }
++
++          WebAuthnCredentialManager.prepareGetAssertion(
++                  assertionBundle.getString("origin"), clientDataHashBytes, requestJSON)
+               .accept(
+-                  found -> {
++                  pendingHandle -> {
+                     ThreadUtils.runOnUiThread(
+                         () -> {
+-                          if (found) {
+-                            // Use GMS API due to having credential, or older Android
+-                            getAssertion(challBytes, allowList, assertionBundle, extensions)
++                          if (pendingHandle != null) {
++                            WebAuthnCredentialManager.getAssertion(pendingHandle)
+                                 .accept(
+                                     response -> result.complete(response),
+                                     e -> result.completeExceptionally(e));
+                             return;
+                           }
+-
+-                          WebAuthnCredentialManager.prepareGetAssertion(
+-                                  assertionBundle.getString("origin"),
+-                                  clientDataHashBytes,
+-                                  requestJSON)
++                          // Credential Manager has no matching credential: security key.
++                          getAssertionWithCtap2(
++                                  allowList, assertionBundle, extensions, clientDataHashBytes)
+                               .accept(
+-                                  pendingHandle -> {
+-                                    ThreadUtils.runOnUiThread(
+-                                        () -> {
+-                                          if (pendingHandle != null) {
+-                                            WebAuthnCredentialManager.getAssertion(pendingHandle)
+-                                                .accept(
+-                                                    response -> result.complete(response),
+-                                                    e -> result.completeExceptionally(e));
+-                                            return;
+-                                          }
+-                                          // Maybe credential manager has no credentials
+-                                          getAssertion(
+-                                                  challBytes,
+-                                                  allowList,
+-                                                  assertionBundle,
+-                                                  extensions)
+-                                              .accept(
+-                                                  response -> result.complete(response),
+-                                                  e -> result.completeExceptionally(e));
+-                                        });
+-                                  },
++                                  response -> result.complete(response),
+                                   e -> result.completeExceptionally(e));
+-                          return;
+                         });
++                  },
++                  e -> {
++                    // Credential Manager unavailable: security key. (A user cancellation or a
++                    // provider error surfaces as ABORT/UNKNOWN and must not fall through.)
++                    if (e == null
++                        || e.getMessage() == null
++                        || !e.getMessage().equals("NOT_SUPPORTED_ERR")) {
++                      result.completeExceptionally(e);
++                      return;
++                    }
++                    getAssertionWithCtap2(
++                            allowList, assertionBundle, extensions, clientDataHashBytes)
++                        .accept(
++                            response -> result.complete(response),
++                            ex -> result.completeExceptionally(ex));
+                   });
+         });
+     return result;
+@@ -584,63 +301,19 @@
+ 
+   @WrapForJNI(calledFrom = "gecko")
+   private static GeckoResult<Boolean> webAuthnIsUserVerifyingPlatformAuthenticatorAvailable() {
+-    final Task<Boolean> task;
+-    final Fido2PrivilegedApiClient fidoClient =
+-        Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-    task = fidoClient.isUserVerifyingPlatformAuthenticatorAvailable();
+-
+-    final GeckoResult<Boolean> res = new GeckoResult<>();
+-    task.addOnSuccessListener(
+-        isUVPAA -> {
+-          res.complete(isUVPAA);
+-        });
+-    task.addOnFailureListener(
+-        e -> {
+-          Log.w(LOGTAG, "isUserVerifyingPlatformAuthenticatorAvailable is failed", e);
+-          res.complete(false);
+-        });
+-    return res;
++    // There is no platform (internal) authenticator: WebAuthn on this build is served by
++    // Credential Manager passkeys and roaming security keys only.
++    return GeckoResult.fromValue(Boolean.FALSE);
+   }
+ 
+-  private static GeckoResult<Boolean> hasCredentialInGMS(
+-      final String rpId, final WebAuthnUtils.WebAuthnPublicCredential[] allowList) {
+-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+-      // Always use GMS on old Android
+-      return GeckoResult.fromValue(true);
+-    }
+-    if (!BuildConfig.MOZILLA_OFFICIAL) {
+-      // No way to check credential in GMS. Use Credential Manager at first.
+-      return GeckoResult.fromValue(false);
+-    }
+-
+-    final GeckoResult<Boolean> result = new GeckoResult<>();
++  /** True when the Android Credential Manager service is present on this device. */
++  private static boolean hasCredentialManager() {
+     try {
+-      final Fido2PrivilegedApiClient fidoClient =
+-          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-      final Task<List<FidoCredentialDetails>> task = fidoClient.getCredentialList(rpId);
+-      task.addOnSuccessListener(
+-          credentials -> {
+-            for (final FidoCredentialDetails credential : credentials) {
+-              if (credential.getIsDiscoverable()) {
+-                // All discoverable credentials have to be handled by credential manager
+-                continue;
+-              }
+-
+-              for (final WebAuthnUtils.WebAuthnPublicCredential item : allowList) {
+-                if (Arrays.equals(credential.getCredentialId(), item.id)) {
+-                  // Found credential in GMS.
+-                  result.complete(true);
+-                  return;
+-                }
+-              }
+-            }
+-            result.complete(false);
+-          });
+-      task.addOnFailureListener(e -> result.complete(false));
+-    } catch (final java.lang.Exception e) {
+-      // Play service may be nothing.
+-      return GeckoResult.fromValue(false);
++      return GeckoAppShell.getApplicationContext()
++          .getPackageManager()
++          .hasSystemFeature(PackageManager.FEATURE_CREDENTIALS);
++    } catch (final RuntimeException e) {
++      return false;
+     }
+-    return result;
+   }
+ }
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
+index 0000000..1111111 100644
+--- a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
+@@ -7,7 +7,6 @@
+ import android.util.Base64;
+ import android.util.Log;
+ import androidx.annotation.NonNull;
+-import com.google.android.gms.fido.common.Transport;
+ import java.nio.ByteBuffer;
+ import java.util.ArrayList;
+ import java.util.List;
+@@ -34,26 +33,6 @@
+     DIRECT,
+   }
+ 
+-  public static List<Transport> getTransportsForByte(final byte transports) {
+-    final ArrayList<Transport> result = new ArrayList<Transport>();
+-    if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
+-      result.add(Transport.USB);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_NFC) == AUTHENTICATOR_TRANSPORT_NFC) {
+-      result.add(Transport.NFC);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_BLE) == AUTHENTICATOR_TRANSPORT_BLE) {
+-      result.add(Transport.BLUETOOTH_LOW_ENERGY);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_INTERNAL) == AUTHENTICATOR_TRANSPORT_INTERNAL) {
+-      result.add(Transport.INTERNAL);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_HYBRID) == AUTHENTICATOR_TRANSPORT_HYBRID) {
+-      result.add(Transport.HYBRID);
+-    }
+-    return result;
+-  }
+-
+   /* package */ static JSONArray getJSONTransportsForByte(final byte transports) {
+     final JSONArray json = new JSONArray();
+     if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
+index 0000000..1111111 100644
+--- a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
+@@ -6,7 +6,6 @@
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+ 
+-import com.google.android.gms.fido.common.Transport;
+ import java.util.Arrays;
+ import java.util.List;
+ import org.json.JSONArray;
+@@ -118,18 +117,6 @@
+   public void transportValue() throws Exception {
+     final byte transports = 31;
+ 
+-    final List<Transport> expectedFidoTransports =
+-        Arrays.asList(
+-            Transport.USB,
+-            Transport.NFC,
+-            Transport.BLUETOOTH_LOW_ENERGY,
+-            Transport.INTERNAL,
+-            Transport.HYBRID);
+-    assertEquals(
+-        "FIDO2's transport should be matched",
+-        WebAuthnUtils.getTransportsForByte(transports),
+-        expectedFidoTransports);
+-
+     final String[] expectedJsonTransports =
+         new String[] {"usb", "nfc", "ble", "internal", "hybrid"};
+     final JSONArray array = WebAuthnUtils.getJSONTransportsForByte(transports);
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
+new file mode 100644
+@@ -0,0 +1,319 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++import com.upokecenter.cbor.CBOREncodeOptions;
++import com.upokecenter.cbor.CBORObject;
++import com.upokecenter.cbor.CBORType;
++import java.util.List;
++
++/**
++ * Minimal CBOR codec for the two CTAP2 commands the browser needs, per the CTAP2 spec's normative
++ * examples. Encode uses {@code DefaultCtap2Canonical} (canonical map-key order, minimal integer
++ * forms) as required for requests.
++ *
++ * <p>getAssertion (0x02) request (map, integer keys):
++ *
++ * <pre>
++ *   1  rpId            text, REQUIRED
++ *   2  clientDataHash  bytes, REQUIRED
++ *   3  allowList       array of { "type": "public-key", "id": bytes }, optional  (TEXT keys!)
++ *   4  extensions      map { "appid": text }, optional
++ *   5  options         map { "up": true, "uv"?: true }, optional
++ * </pre>
++ *
++ * getAssertion response (map): 1=credential (INTEGER key 1 holding a TEXT-keyed descriptor
++ * {"id": bytes, "type": "public-key"}), 2=authData, 3=signature, 4=user, 5=numberOfCredentials.
++ *
++ * <p>makeCredential (0x01) request (map):
++ *
++ * <pre>
++ *   1  clientDataHash   bytes, REQUIRED
++ *   2  rp               map { 1: id, 2: name }
++ *   3  user             map { 1: id (bytes), 2: name, 3: displayName }
++ *   4  pubKeyCredParams array of { 1: "public-key", 2: alg }
++ *   5  excludeList      array of { 1: "public-key", 2: id }, optional  (INTEGER keys!)
++ *   6  options          map { "up": true, "rk"?: bool, "uv"?: bool }
++ * </pre>
++ *
++ * makeCredential response (map): 1=fmt, 2=attStmt, 3=attObj.
++ *
++ * <p>The CBOR key-type asymmetry above is deliberate and spec-mandated: allowList entries use text
++ * keys while excludeList and pubKeyCredParams entries use integer keys. Verified against the real
++ * com.upokecenter:cbor 4.5.6 codec (20/20 checks in the Phase-2 harness).
++ *
++ * <p>Ported (Java) from the Proton Mail fork's fido-nfc module with the makeCredential half added.
++ */
++public final class Ctap2Cbor {
++
++  private static final CBOREncodeOptions CTAP2_CANONICAL =
++      CBOREncodeOptions.DefaultCtap2Canonical;
++
++  private Ctap2Cbor() {}
++
++  /** One entry of a getAssertion allowList / makeCredential excludeList. */
++  public static final class CredentialId {
++    public final byte[] id;
++
++    public CredentialId(final byte[] id) {
++      this.id = id;
++    }
++  }
++
++  /** One pubKeyCredParams entry: algorithm identifier (e.g. -7 = ES256). */
++  public static final class PublicKeyCredParam {
++    public final int alg;
++
++    public PublicKeyCredParam(final int alg) {
++      this.alg = alg;
++    }
++  }
++
++  /** Decoded authenticatorGetAssertion response. */
++  public static final class GetAssertionResponse {
++    public final byte[] credentialId;
++    public final byte[] authenticatorData;
++    public final byte[] signature;
++    /** The key's user handle (map key 4, "id") when present; otherwise null. */
++    public final byte[] userHandle;
++
++    GetAssertionResponse(
++        final byte[] credentialId,
++        final byte[] authenticatorData,
++        final byte[] signature,
++        final byte[] userHandle) {
++      this.credentialId = credentialId;
++      this.authenticatorData = authenticatorData;
++      this.signature = signature;
++      this.userHandle = userHandle;
++    }
++  }
++
++  /** Decoded authenticatorMakeCredential response (CTAP2 section 5.1). */
++  public static final class MakeCredentialResponse {
++    public final String fmt;
++    /** Raw authenticator data (binary): rpIdHash(32) flags(1) signCount(4) [aaguid(16) credIdLen(2) credId ...]. */
++    public final byte[] authData;
++    /**
++     * The [WebAuthn] attestation object — a CBOR map with TEXT keys { authData, fmt, attStmt } —
++     * which is what the Gecko (auth-rs) parser expects, NOT the raw CTAP2 response envelope.
++     */
++    public final byte[] attestationObject;
++
++    MakeCredentialResponse(
++        final String fmt, final byte[] authData, final byte[] attestationObject) {
++      this.fmt = fmt;
++      this.authData = authData;
++      this.attestationObject = attestationObject;
++    }
++  }
++
++  /**
++   * Encodes authenticatorGetAssertion (CTAP2 spec section 5.2). {@code clientDataHash} must be the
++   * SHA-256 of the clientDataJSON the relying party received. {@code appId} (the legacy FIDO
++   * AppID extension) is sent as the "appid" extension when non-null; per WebAuthn L2 section 10.1
++   * the caller must also have substituted the AppID for rpId.
++   *
++   * <p>"up" (user presence) is always true for a roaming security key. "uv" is sent only when the
++   * relying party REQUIRES user verification — a plain key has no local gesture and an unrequested
++   * uv:true is rejected with CTAP2_ERR_UNSUPPORTED_OPTION.
++   */
++  public static byte[] encodeGetAssertion(
++      final String rpId,
++      final byte[] clientDataHash,
++      final List<CredentialId> allowCredentials,
++      final String appId,
++      final boolean userVerificationRequired) {
++    final CBORObject map = CBORObject.NewMap();
++    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(rpId));
++    map.Add(CBORObject.FromObject(2), CBORObject.FromObject(clientDataHash));
++    if (allowCredentials != null && !allowCredentials.isEmpty()) {
++      final CBORObject arr = CBORObject.NewArray();
++      for (final CredentialId cred : allowCredentials) {
++        // allowList descriptors use TEXT keys (spec examples; WebAuthn 5.8.3).
++        final CBORObject desc = CBORObject.NewMap();
++        desc.Add(CBORObject.FromObject("type"), CBORObject.FromObject("public-key"));
++        desc.Add(CBORObject.FromObject("id"), CBORObject.FromObject(cred.id));
++        arr.Add(desc);
++      }
++      map.Add(CBORObject.FromObject(3), arr);
++    }
++    if (appId != null && !appId.isEmpty()) {
++      final CBORObject ext = CBORObject.NewMap();
++      ext.Add(CBORObject.FromObject("appid"), CBORObject.FromObject(appId));
++      map.Add(CBORObject.FromObject(4), ext);
++    }
++    final CBORObject opts = CBORObject.NewMap();
++    opts.Add(CBORObject.FromObject("up"), CBORObject.FromObject(true));
++    if (userVerificationRequired) {
++      opts.Add(CBORObject.FromObject("uv"), CBORObject.FromObject(true));
++    }
++    map.Add(CBORObject.FromObject(5), opts);
++    return map.EncodeToBytes(CTAP2_CANONICAL);
++  }
++
++  /**
++   * Decodes the authenticatorGetAssertion response. Response key 1 (credential) is an INTEGER key
++   * holding a TEXT-keyed descriptor — the classic CBOR key-type trap. It may be absent (e.g. a
++   * single-credential allowList response); the id is then recovered from {@code
++   * allowCredentials} when exactly one was allowed.
++   */
++  public static GetAssertionResponse decodeGetAssertion(
++      final byte[] bytes, final List<CredentialId> allowCredentials) {
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    // Key 1 is the selected credential: CTAP2 5.2 defines it as a single
++    // PublicKeyCredentialDescriptor (a TEXT-keyed map { "id": <bytes>, "type": ... }), but a few
++    // authenticators emit an ARRAY of descriptors, and a device-resident credential may omit the
++    // key entirely. Handle all three defensively.
++    CBORObject credentialId = null;
++    final CBORObject credObj = map.get(1);
++    if (credObj != null) {
++      if (credObj.getType() == CBORType.Array && credObj.size() > 0) {
++        credentialId = credObj.get(0).get("id");
++      } else if (credObj.getType() == CBORType.Map) {
++        credentialId = credObj.get("id");
++      }
++    }
++    if (credentialId == null
++        && allowCredentials != null
++        && allowCredentials.size() == 1) {
++      credentialId = CBORObject.FromObject(allowCredentials.get(0).id);
++    }
++    if (credentialId == null) {
++      throw new IllegalStateException("CTAP2 response missing credential (key 1)");
++    }
++    byte[] userHandle = null;
++    final CBORObject userObj = map.get(4);
++    if (userObj != null && userObj.getType() == CBORType.Map) {
++      // The user entity's id is a byte string under the text key "id" (WebAuthn
++      // PublicKeyCredentialUserEntity); integer key 1 is the CTAP2 wire form.
++      final CBORObject uid =
++          userObj.get("id") != null ? userObj.get("id") : userObj.get(1);
++      if (uid != null && uid.getType() == CBORType.ByteString) {
++        userHandle = uid.GetByteString();
++      }
++    }
++    return new GetAssertionResponse(
++        asBytes(credentialId, "credential.id"),
++        asBytes(map.get(2), "authData"),
++        asBytes(map.get(3), "signature"),
++        userHandle);
++  }
++
++  /**
++   * Encodes authenticatorMakeCredential (CTAP2 spec section 5.1). {@code clientDataHash} must be
++   * the SHA-256 of the clientDataJSON. Top-level CTAP2 parameters use INTEGER keys (1..7); the
++   * nested [WebAuthn] structures (rp, user, credential descriptors, pubKeyCredParams entries)
++   * use TEXT keys. "up" is always true; "rk" is sent only when the request asks for a resident
++   * (discoverable) credential, and "uv" only when user verification is required — an unrequested
++   * option risks CTAP2_ERR_UNSUPPORTED_OPTION.
++   */
++  public static byte[] encodeMakeCredential(
++      final byte[] clientDataHash,
++      final String rpId,
++      final String rpName,
++      final byte[] userId,
++      final String userName,
++      final String userDisplayName,
++      final List<PublicKeyCredParam> pubKeyCredParams,
++      final List<CredentialId> excludeList,
++      final boolean residentKey,
++      final boolean userVerificationRequired) {
++    final CBORObject map = CBORObject.NewMap();
++    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(clientDataHash));
++
++    final CBORObject rp = CBORObject.NewMap();
++    rp.Add(CBORObject.FromObject("id"), CBORObject.FromObject(rpId));
++    if (rpName != null && !rpName.isEmpty()) {
++      rp.Add(CBORObject.FromObject("name"), CBORObject.FromObject(rpName));
++    }
++    map.Add(CBORObject.FromObject(2), rp);
++
++    final CBORObject user = CBORObject.NewMap();
++    user.Add(CBORObject.FromObject("id"), CBORObject.FromObject(userId));
++    if (userName != null && !userName.isEmpty()) {
++      user.Add(CBORObject.FromObject("name"), CBORObject.FromObject(userName));
++    }
++    if (userDisplayName != null && !userDisplayName.isEmpty()) {
++      user.Add(CBORObject.FromObject("displayName"), CBORObject.FromObject(userDisplayName));
++    }
++    map.Add(CBORObject.FromObject(3), user);
++
++    final CBORObject params = CBORObject.NewArray();
++    for (final PublicKeyCredParam p : pubKeyCredParams) {
++      // pubKeyCredParams entries use TEXT keys (PublicKeyCredentialParameters, [WebAuthn] 5.8).
++      final CBORObject entry = CBORObject.NewMap();
++      entry.Add(CBORObject.FromObject("type"), CBORObject.FromObject("public-key"));
++      entry.Add(CBORObject.FromObject("alg"), CBORObject.FromObject(p.alg));
++      params.Add(entry);
++    }
++    map.Add(CBORObject.FromObject(4), params);
++
++    if (excludeList != null && !excludeList.isEmpty()) {
++      final CBORObject arr = CBORObject.NewArray();
++      for (final CredentialId cred : excludeList) {
++        // excludeList descriptors use TEXT keys (PublicKeyCredentialDescriptor, [WebAuthn] 5.8.3)
++        // — same shape as allowList entries.
++        final CBORObject entry = CBORObject.NewMap();
++        entry.Add(CBORObject.FromObject("type"), CBORObject.FromObject("public-key"));
++        entry.Add(CBORObject.FromObject("id"), CBORObject.FromObject(cred.id));
++        arr.Add(entry);
++      }
++      map.Add(CBORObject.FromObject(5), arr);
++    }
++
++    final CBORObject opts = CBORObject.NewMap();
++    opts.Add(CBORObject.FromObject("up"), CBORObject.FromObject(true));
++    if (residentKey) {
++      opts.Add(CBORObject.FromObject("rk"), CBORObject.FromObject(true));
++    }
++    if (userVerificationRequired) {
++      opts.Add(CBORObject.FromObject("uv"), CBORObject.FromObject(true));
++    }
++    map.Add(CBORObject.FromObject(7), opts);
++    return map.EncodeToBytes(CTAP2_CANONICAL);
++  }
++
++  /**
++   * Decodes the authenticatorMakeCredential response. The raw CTAP2 (section 5.1) envelope uses
++   * INTEGER keys: 1=fmt (text), 2=authData (byte string), 3=attStmt (a CBOR map). That envelope is
++   * NOT what Gecko's (auth-rs) parser consumes — it expects the [WebAuthn] attestation object, a
++   * map with TEXT keys { authData, fmt, attStmt }. This decodes the raw envelope and re-encodes the
++   * WebAuthn object, mirroring what the GMS FIDO client handed to Gecko. The caller recovers the
++   * credentialId from {@link MakeCredentialResponse#authData}.
++   */
++  public static MakeCredentialResponse decodeMakeCredential(final byte[] bytes) {
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    final CBORObject fmt = map.get(1);
++    final CBORObject authData = map.get(2);
++    final CBORObject attStmt = map.get(3);
++    if (fmt == null || authData == null || attStmt == null) {
++      throw new IllegalStateException("CTAP2 makeCredential response missing fmt/authData/attStmt");
++    }
++    final byte[] authDataBytes = asBytes(authData, "authData");
++    final String fmtString = fmt.AsString();
++
++    // Re-encode as the [WebAuthn] attestation object (TEXT keys) Gecko/auth-rs expects.
++    final CBORObject attObj = CBORObject.NewMap();
++    attObj.Add(CBORObject.FromObject("authData"), CBORObject.FromObject(authDataBytes));
++    attObj.Add(CBORObject.FromObject("fmt"), CBORObject.FromObject(fmtString));
++    attObj.Add(CBORObject.FromObject("attStmt"), attStmt);
++    final byte[] attestationObject = attObj.EncodeToBytes(CTAP2_CANONICAL);
++    return new MakeCredentialResponse(fmtString, authDataBytes, attestationObject);
++  }
++
++  private static byte[] asBytes(final CBORObject item, final String field) {
++    if (item == null) {
++      throw new IllegalStateException("CTAP2 response missing key: " + field);
++    }
++    if (item.getType() == CBORType.ByteString) {
++      return item.GetByteString();
++    }
++    if (item.getType() == CBORType.TextString) {
++      return item.AsString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
++    }
++    throw new IllegalStateException("CTAP2 response field " + field + " is not a byte string");
++  }
++}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
+new file mode 100644
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++/**
++ * Transport- or CTAP-level failure of the native FIDO2 flow. {@link #ctapStatus} carries the raw
++ * CTAP2 status byte (spec section 6.1) when the key itself rejected the command, or 0 for
++ * host-side failures. The WebAuthn seam maps these to WebAuthn error names.
++ *
++ * <p>Ported (Java) from the Proton Mail fork's proven fido-nfc module.
++ */
++public class Ctap2Error extends RuntimeException {
++  private final int mCtapStatus;
++
++  public Ctap2Error(final String message) {
++    this(message, 0, null);
++  }
++
++  public Ctap2Error(final String message, final int ctapStatus, final Throwable cause) {
++    super(message, cause);
++    mCtapStatus = ctapStatus;
++  }
++
++  /** The raw CTAP2 status byte, or 0 for host-side failures. */
++  public int getCtapStatus() {
++    return mCtapStatus;
++  }
++}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
+new file mode 100644
+@@ -0,0 +1,40 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++/**
++ * A bound CTAP2 channel, transport-agnostic. {@link #prepare()} makes the FIDO2 authenticator
++ * reachable (NFC: applet select; USB: CTAPHID channel allocation). {@link #send(int, byte[])} runs
++ * one CTAP2 command — {@link #CTAP_MAKE_CREDENTIAL} or {@link #CTAP_GET_ASSERTION} — and returns
++ * the CBOR response body when the CTAP status is 0x00, otherwise throws {@link Ctap2Error} with the
++ * CTAP status code.
++ *
++ * <p>Ported (Java) from the Proton Mail fork's fido-nfc module; the command byte is generalized so
++ * the same session can run makeCredential (0x01) as well as getAssertion (0x02), which the
++ * browser needs for credential enrollment.
++ */
++public interface Ctap2Session {
++  /** authenticatorMakeCredential (CTAP2 spec section 5.1). */
++  int CTAP_MAKE_CREDENTIAL = 0x01;
++  /** authenticatorGetAssertion (CTAP2 spec section 5.2). */
++  int CTAP_GET_ASSERTION = 0x02;
++
++  /** Makes the authenticator reachable. Returns false when the key cannot be prepared. */
++  boolean prepare() throws Ctap2Error;
++
++  /**
++   * Runs a CTAP2 command on this session.
++   *
++   * @param ctapCmd the CTAP2 command byte ({@link #CTAP_MAKE_CREDENTIAL} or {@link
++   *     #CTAP_GET_ASSERTION})
++   * @param cborPayload the canonical CBOR request parameters
++   * @return the CBOR response body (CTAP status was 0x00)
++   * @throws Ctap2Error when the key reported a non-zero CTAP status or the transport failed
++   */
++  byte[] send(int ctapCmd, byte[] cborPayload) throws Ctap2Error;
++
++  /** Releases the transport (idempotent). */
++  void close();
++}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
+new file mode 100644
+@@ -0,0 +1,272 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++import android.app.Activity;
++import android.nfc.NfcAdapter;
++import android.nfc.Tag;
++import android.nfc.tech.IsoDep;
++import android.util.Log;
++import java.io.ByteArrayOutputStream;
++
++/**
++ * CTAP2 over NFC (ISO 14443-4 / IsoDep) transport, per CTAP2 spec section 8.2.
++ *
++ * <p>Framing (spec 8.2.4):
++ *
++ * <ul>
++ *   <li>applet select: 00 A4 04 00 Lc &lt;AID&gt;. Success SW 9000.
++ *   <li>command: 80 10 00 00 Lc &lt;CTAP command byte || CBOR&gt; Le. The data field is the single
++ *       CTAP command byte followed by the CBOR parameters.
++ *   <li>response: SW 9000 + data, where data = CTAP status byte (1) || CBOR. 91 00 = status
++ *       update, 61 xx = xx more bytes; both are followed with a GETRESPONSE.
++ *   <li>GETRESPONSE: 80 C0 00 00 [Le]. INS 0xC0 per the spec's normative trace.
++ * </ul>
++ *
++ * <p>Ported (Java) from the Proton Mail fork's fido-nfc module; the request method is generalized
++ * to take the CTAP command byte so makeCredential (0x01) works beside getAssertion (0x02).
++ */
++public class NfcCtap2Transport {
++
++  static final String TAG = "GeckoCtap2Nfc";
++
++  private static final int TIMEOUT_MS = 5000;
++  private static final int MAX_SHORT_DATA = 255;
++  private static final byte INS_GETRESPONSE = (byte) 0xC0;
++
++  // FIDO2 AID: RID A0 00 00 06 47, PIX 2F 00 01.
++  private static final byte[] AID =
++      new byte[] {(byte) 0xA0, 0x00, 0x00, 0x06, 0x47, 0x2F, 0x00, 0x01};
++
++  private IsoDep mIsoDep;
++
++  /** Binds {@code tag}. Returns false if the tag does not support IsoDep or connect fails. */
++  public boolean bindTag(final Tag tag) {
++    final IsoDep dep = IsoDep.get(tag);
++    if (dep == null) {
++      return false;
++    }
++    try {
++      dep.connect();
++      mIsoDep = dep;
++      return true;
++    } catch (final Exception e) {
++      return false;
++    }
++  }
++
++  public void release() {
++    try {
++      if (mIsoDep != null) {
++        mIsoDep.close();
++      }
++    } catch (final Exception e) {
++      // best-effort
++    }
++    mIsoDep = null;
++  }
++
++  /** FIDO2 applet select (spec 8.2.3). Returns true when the applet is present. */
++  public boolean selectFidoApplet() {
++    final IsoDep dep = mIsoDep;
++    if (dep == null) {
++      return false;
++    }
++    try {
++      final byte[] apdu = new byte[5 + AID.length];
++      apdu[0] = 0x00;
++      apdu[1] = (byte) 0xA4;
++      apdu[2] = 0x04;
++      apdu[3] = 0x00;
++      apdu[4] = (byte) AID.length;
++      System.arraycopy(AID, 0, apdu, 5, AID.length);
++      final byte[] resp = transceive(dep, apdu);
++      final int sw = statusWord(resp);
++      return sw == 0x9000 || (sw >> 8) == 0x61;
++    } catch (final Exception e) {
++      return false;
++    }
++  }
++
++  /**
++   * Runs one CTAP2 command ({@link Ctap2Session#CTAP_MAKE_CREDENTIAL} or {@link
++   * Ctap2Session#CTAP_GET_ASSERTION}). Returns the CBOR response body when the CTAP status is
++   * 0x00; otherwise throws {@link Ctap2Error} with the CTAP status code.
++   */
++  public byte[] sendCtapCommand(final int ctapCmd, final byte[] cborPayload) {
++    final IsoDep dep = mIsoDep;
++    if (dep == null) {
++      throw new Ctap2Error("NFC transport not bound");
++    }
++    // Spec 8.2.4.1: data field = CTAP command byte || CBOR parameters.
++    final byte[] data = new byte[cborPayload.length + 1];
++    data[0] = (byte) ctapCmd;
++    System.arraycopy(cborPayload, 0, data, 1, cborPayload.length);
++    if (data.length > MAX_SHORT_DATA) {
++      throw new Ctap2Error(
++          "CTAP request too large for short APDU: " + data.length);
++    }
++    // Single short (case-4) APDU: 80 10 00 00 Lc <cmd || CBOR> Le=00.
++    final byte[] apdu = new byte[5 + data.length + 1];
++    apdu[0] = (byte) 0x80;
++    apdu[1] = 0x10;
++    apdu[2] = 0x00;
++    apdu[3] = 0x00;
++    apdu[4] = (byte) data.length;
++    System.arraycopy(data, 0, apdu, 5, data.length);
++    apdu[5 + data.length] = 0x00;
++    final byte[] raw = unwrapResponse(transceive(dep, apdu), dep);
++    if (raw.length == 0) {
++      throw new Ctap2Error("empty NFC response");
++    }
++    final int ctapStatus = raw[0];
++    final byte[] body = new byte[raw.length - 1];
++    System.arraycopy(raw, 1, body, 0, body.length);
++    if (ctapStatus != 0x00) {
++      throw new Ctap2Error(
++          "CTAP command 0x"
++              + Integer.toHexString(ctapCmd)
++              + " failed, status 0x"
++              + Integer.toHexString(ctapStatus & 0xFF).toUpperCase(),
++          ctapStatus,
++          null);
++    }
++    return body;
++  }
++
++  /**
++   * Unwraps the ISO 7816 layer: strips status words, follows 9100 (status update) and 61xx (xx
++   * trailing bytes) chains via GETRESPONSE. Returns the application data, i.e. CTAP status byte ||
++   * CBOR. The attestation object of a makeCredential response routinely exceeds 255 bytes, so the
++   * chain is not optional.
++   */
++  private byte[] unwrapResponse(final byte[] first, final IsoDep dep) {
++    final ByteArrayOutputStream out = new ByteArrayOutputStream();
++    byte[] resp = first;
++    int sw = statusWord(resp);
++    while (true) {
++      if (sw == 0x9000) {
++        out.write(bodyOf(resp), 0, bodyOf(resp).length);
++        return out.toByteArray();
++      } else if (sw == 0x9100) {
++        // Status update — poll for data.
++        resp = getResponse(dep, 0);
++        sw = statusWord(resp);
++      } else if ((sw & 0xFF00) == 0x6100) {
++        // xx trailing bytes available; request exactly that many.
++        final byte[] b = bodyOf(resp);
++        out.write(b, 0, b.length);
++        resp = getResponse(dep, sw & 0xFF);
++        sw = statusWord(resp);
++      } else {
++        throw new Ctap2Error(
++            "NFC rejected, SW 0x" + Integer.toHexString(sw).toUpperCase());
++      }
++    }
++  }
++
++  /**
++   * GETRESPONSE (INS 0xC0, per the spec's normative trace). {@code le} is the number of bytes to
++   * request; 0 = up to 256 (Le omitted / 0x00 in short form).
++   */
++  private byte[] getResponse(final IsoDep dep, final int le) {
++    final byte[] apdu =
++        le == 0
++            ? new byte[] {(byte) 0x80, INS_GETRESPONSE, 0x00, 0x00}
++            : new byte[] {(byte) 0x80, INS_GETRESPONSE, 0x00, 0x00, (byte) le};
++    return transceive(dep, apdu);
++  }
++
++  private byte[] transceive(final IsoDep dep, final byte[] apdu) {
++    dep.setTimeout(TIMEOUT_MS);
++    try {
++      return dep.transceive(apdu);
++    } catch (final Exception e) {
++      Log.e(TAG, "transceive failed req=[" + toHex(apdu) + "]", e);
++      throw new Ctap2Error("NFC transceive failed: " + e.getMessage(), 0, e);
++    }
++  }
++
++  private static byte[] bodyOf(final byte[] resp) {
++    if (resp.length <= 2) {
++      return new byte[0];
++    }
++    final byte[] body = new byte[resp.length - 2];
++    System.arraycopy(resp, 0, body, 0, body.length);
++    return body;
++  }
++
++  private static String toHex(final byte[] data) {
++    final StringBuilder sb = new StringBuilder();
++    for (final byte b : data) {
++      if (sb.length() > 0) {
++        sb.append(' ');
++      }
++      sb.append(String.format("%02X", b & 0xFF));
++    }
++    return sb.toString();
++  }
++
++  private static int statusWord(final byte[] resp) {
++    if (resp.length < 2) {
++      return -1;
++    }
++    return ((resp[resp.length - 2] & 0xFF) << 8) | (resp[resp.length - 1] & 0xFF);
++  }
++
++  /**
++   * Holds the host activity in NFC reader mode for the duration of a key tap; every
++   * IsoDep-capable tag is forwarded to the listener. Ending the activity tears the reader down
++   * (Android disables reader mode with the activity).
++   */
++  public static class NfcReader {
++
++    /** Receives every IsoDep-capable tag tapped while the reader is armed. */
++    public interface TagListener {
++      void onTag(Tag tag);
++    }
++
++    private final TagListener mListener;
++
++    public NfcReader(final TagListener listener) {
++      mListener = listener;
++    }
++
++    public boolean start(final Activity activity) {
++      final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
++      if (adapter == null || !adapter.isEnabled()) {
++        return false;
++      }
++      try {
++        adapter.enableReaderMode(
++            activity,
++            tag -> mListener.onTag(tag),
++            NfcAdapter.FLAG_READER_NFC_A
++                | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
++                | NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
++            null);
++      } catch (final Exception e) {
++        return false;
++      }
++      return true;
++    }
++
++    /**
++     * Disables reader mode on {@code activity}. Called when the USB transport wins the first-wins
++     * race while reader mode is armed.
++     */
++    public void stop(final Activity activity) {
++      final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
++      if (adapter == null) {
++        return;
++      }
++      try {
++        adapter.disableReaderMode(activity);
++      } catch (final Exception e) {
++        // best-effort
++      }
++    }
++  }
++}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
+new file mode 100644
+@@ -0,0 +1,434 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++import android.hardware.usb.UsbConstants;
++import android.hardware.usb.UsbDevice;
++import android.hardware.usb.UsbDeviceConnection;
++import android.hardware.usb.UsbEndpoint;
++import android.hardware.usb.UsbInterface;
++import android.hardware.usb.UsbManager;
++import android.hardware.usb.UsbRequest;
++import android.util.Log;
++import java.io.ByteArrayOutputStream;
++import java.nio.ByteBuffer;
++import java.nio.ByteOrder;
++import java.security.SecureRandom;
++
++/**
++ * CTAP2 over USB HID transport ("CTAPHID"), per the FIDO Alliance CTAP v2.0 spec, section 8.1.
++ *
++ * <p>Wire layer (spec 8.1.4): fixed-size HID reports (64 bytes on full-speed devices).
++ * Initialization packet: CID(4) CMD(1, bit 7 set) BCNT(2, big-endian) DATA(...). Continuation
++ * packet: CID(4) SEQ(1, 0..0x7f, ascending) DATA(...).
++ *
++ * <p>Handshake (spec 8.1.9.1.3, CTAPHID_INIT 0x06): INIT on the broadcast CID (0xFFFFFFFF)
++ * allocates a channel. Request data is an 8-byte nonce; the response carries the same nonce, then
++ * the 4-byte channel ID, protocol version, device version, capability flags. Commands then run on
++ * the allocated channel.
++ *
++ * <p>CTAP2 commands (spec 8.1.9.1.2, CTAPHID_CBOR 0x10): request data is the CTAP command byte
++ * followed by the CBOR payload; response data is the CTAP status byte followed by the CBOR
++ * payload. Keep-alive packets (CTAPHID_KEEPALIVE 0x3B) are consumed and skipped. A CTAPHID_ERROR
++ * (0x3F) response carries a 1-byte CTAPHID error code (spec 8.1.9.1.6).
++ *
++ * <p>Host side: standard Android USB host mode (UsbRequest + requestWait). Both the IN and OUT
++ * UsbRequests are always queued; requestWait returns whichever completes first, so an in-flight
++ * response is never lost even though a write completes as soon as the report hits the bus.
++ *
++ * <p>Ported (Java) from the Proton Mail fork's fido-nfc module; the request method is generalized
++ * to take the CTAP command byte so makeCredential (0x01) works beside getAssertion (0x02).
++ */
++public class UsbCtap2Transport {
++
++  static final String TAG = "GeckoCtap2Usb";
++
++  // CTAPHID commands (spec 8.1.9).
++  private static final byte CMD_CBOR = (byte) 0x10;
++  private static final byte CMD_INIT = (byte) 0x06;
++  private static final byte CMD_KEEPALIVE = (byte) 0x3B;
++  private static final byte CMD_ERROR = (byte) 0x3F;
++
++  private static final int BROADCAST_CID = -1; // 0xFFFFFFFF
++  private static final int CAPABILITY_CBOR = 0x04;
++
++  private static final int USB_CLASS_HID = 0x03;
++  // YubiKey interface layout: 0 = keyboard (HID boot), 1 = CTAP HID.
++  private static final int HID_INTERFACE_ID = 1;
++
++  private static final int REPORT_SIZE_DEFAULT = 64;
++  private static final int MIN_REPORT_SIZE = 8;
++
++  private static final int NONCE_SIZE = 8;
++  // INIT response (spec 8.1.9.1.3): nonce(8) cid(4) protVer(1) devVer(3) caps(1).
++  private static final int INIT_RESPONSE_SIZE = 17;
++
++  private static final long WAIT_TIMEOUT_MS = 1000L;
++  private static final long PACKET_TIMEOUT_MS = 30_000L;
++
++  private UsbDeviceConnection mConnection;
++  private UsbRequest mInRequest;
++  private UsbRequest mOutRequest;
++  private int mChannel = -1;
++  private int mReportSize = REPORT_SIZE_DEFAULT;
++  private final ByteBuffer mInBuffer = ByteBuffer.allocateDirect(REPORT_SIZE_DEFAULT);
++  private final ByteBuffer mOutBuffer = ByteBuffer.allocateDirect(REPORT_SIZE_DEFAULT);
++
++  /**
++   * Binds the CTAPHID interface of {@code device}. Returns false when the device has no HID
++   * interface with both an IN and an OUT endpoint (the CTAPHID pair, spec 8.1.8.1) or the
++   * interface cannot be claimed.
++   */
++  public boolean bindDevice(final UsbDevice device, final UsbManager usb) {
++    UsbInterface intf = null;
++    for (int i = 0; i < device.getInterfaceCount(); i++) {
++      if (device.getInterface(i).getId() == HID_INTERFACE_ID) {
++        intf = device.getInterface(i);
++        break;
++      }
++    }
++    if (intf == null) {
++      for (int i = 0; i < device.getInterfaceCount(); i++) {
++        if (device.getInterface(i).getInterfaceClass() == USB_CLASS_HID) {
++          intf = device.getInterface(i);
++          break;
++        }
++      }
++    }
++    if (intf == null) {
++      return false;
++    }
++    UsbEndpoint out = null;
++    UsbEndpoint inp = null;
++    for (int i = 0; i < intf.getEndpointCount(); i++) {
++      final UsbEndpoint ep = intf.getEndpoint(i);
++      if (ep.getDirection() == UsbConstants.USB_DIR_OUT) {
++        out = ep;
++      } else if (ep.getDirection() == UsbConstants.USB_DIR_IN) {
++        inp = ep;
++      }
++    }
++    if (out == null || inp == null) {
++      return false;
++    }
++    mReportSize = Math.max(inp.getMaxPacketSize(), MIN_REPORT_SIZE);
++    try {
++      final UsbDeviceConnection conn = usb.openDevice(device);
++      if (conn == null) {
++        return false;
++      }
++      if (!conn.claimInterface(intf, true)) {
++        conn.close();
++        return false;
++      }
++      mConnection = conn;
++      mInRequest = new UsbRequest();
++      mInRequest.initialize(conn, inp);
++      mOutRequest = new UsbRequest();
++      mOutRequest.initialize(conn, out);
++      return true;
++    } catch (final Exception e) {
++      Log.e(TAG, "bindDevice failed", e);
++      release();
++      return false;
++    }
++  }
++
++  public void release() {
++    try {
++      if (mInRequest != null) {
++        mInRequest.cancel();
++        mInRequest.close();
++      }
++      if (mOutRequest != null) {
++        mOutRequest.cancel();
++        mOutRequest.close();
++      }
++    } catch (final Exception e) {
++      // best-effort
++    }
++    try {
++      if (mConnection != null) {
++        mConnection.close();
++      }
++    } catch (final Exception e) {
++      // best-effort
++    }
++    mInRequest = null;
++    mOutRequest = null;
++    mConnection = null;
++    mChannel = -1;
++  }
++
++  /**
++   * Allocates a CTAPHID channel via INIT on the broadcast CID. Returns true on success; the
++   * response must echo the request nonce (guards against a stale broadcast response from another
++   * client).
++   */
++  public boolean initialize() {
++    final byte[] nonce = new byte[NONCE_SIZE];
++    new SecureRandom().nextBytes(nonce);
++    final ByteBuffer packet = newOutPacket();
++    packet.putInt(BROADCAST_CID);
++    packet.put(CMD_INIT);
++    putBcnt(packet, nonce.length);
++    packet.put(nonce);
++
++    final byte[] resp = transact(packet, CMD_INIT, BROADCAST_CID);
++    if (resp == null || resp.length < INIT_RESPONSE_SIZE) {
++      return false;
++    }
++    for (int i = 0; i < NONCE_SIZE; i++) {
++      if (resp[i] != nonce[i]) {
++        return false;
++      }
++    }
++    mChannel =
++        ((resp[NONCE_SIZE] & 0xFF) << 24)
++            | ((resp[NONCE_SIZE + 1] & 0xFF) << 16)
++            | ((resp[NONCE_SIZE + 2] & 0xFF) << 8)
++            | (resp[NONCE_SIZE + 3] & 0xFF);
++    final int caps = resp[NONCE_SIZE + 8] & 0xFF;
++    if ((caps & CAPABILITY_CBOR) == 0) {
++      Log.w(TAG, "device reports no CTAPHID_CBOR capability (caps=0x" + Integer.toHexString(caps) + ")");
++    }
++    return true;
++  }
++
++  /**
++   * Runs one CTAP2 command ({@link Ctap2Session#CTAP_MAKE_CREDENTIAL} or {@link
++   * Ctap2Session#CTAP_GET_ASSERTION}) on the allocated channel. Returns the CBOR response body
++   * when the CTAP status is 0x00; otherwise throws {@link Ctap2Error} with the CTAP status code.
++   */
++  public byte[] sendCtapCommand(final int ctapCmd, final byte[] cborPayload) {
++    if (mChannel < 0) {
++      throw new Ctap2Error("USB channel not initialized");
++    }
++    final byte[] data = new byte[cborPayload.length + 1];
++    data[0] = (byte) ctapCmd;
++    System.arraycopy(cborPayload, 0, data, 1, cborPayload.length);
++    final byte[] resp = transactMessage(CMD_CBOR, data);
++    if (resp == null) {
++      throw new Ctap2Error("no USB response to CTAP command 0x" + Integer.toHexString(ctapCmd));
++    }
++    if (resp.length == 0) {
++      throw new Ctap2Error("empty USB response");
++    }
++    final int ctapStatus = resp[0];
++    final byte[] body = new byte[resp.length - 1];
++    System.arraycopy(resp, 1, body, 0, body.length);
++    if (ctapStatus != 0x00) {
++      throw new Ctap2Error(
++          "CTAP command 0x"
++              + Integer.toHexString(ctapCmd)
++              + " failed, status 0x"
++              + Integer.toHexString(ctapStatus & 0xFF).toUpperCase(),
++          ctapStatus,
++          null);
++    }
++    return body;
++  }
++
++  /**
++   * Sends one CTAPHID message (command {@code cmd}, payload {@code data}; spans continuation
++   * packets when the payload exceeds one report) and returns the full response payload.
++   * Keep-alive packets are skipped; a CTAPHID_ERROR throws {@link Ctap2Error}.
++   */
++  private byte[] transactMessage(final byte cmd, final byte[] data) {
++    final int total = data.length;
++    final int perPacket = mReportSize - 7;
++    int offset = 0;
++    int packetIndex = 0;
++    while (true) {
++      final int chunk = Math.min(perPacket, total - offset);
++      final ByteBuffer packet = newOutPacket();
++      packet.putInt(mChannel);
++      if (packetIndex == 0) {
++        packet.put(cmd);
++        putBcnt(packet, total);
++      } else {
++        packet.put((byte) packetIndex); // SEQ, 0-based continuation index
++      }
++      if (chunk > 0) {
++        packet.put(data, offset, chunk);
++      }
++      if (!sendOut(packet)) {
++        return null;
++      }
++      offset += chunk;
++      packetIndex++;
++      if (offset >= total) {
++        break;
++      }
++    }
++
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    while (true) {
++      final ByteBuffer resp = waitForIn();
++      if (resp == null) {
++        return null;
++      }
++      final byte cmdByte = resp.get(4);
++      final int len = bcntOf(resp);
++      if (cmdByte == CMD_KEEPALIVE) {
++        continue; // processing / user-presence indicator
++      }
++      if (cmdByte == CMD_ERROR) {
++        final int code = len >= 1 ? resp.get(5) & 0xFF : -1;
++        throw new Ctap2Error("USB CTAPHID error 0x" + Integer.toHexString(code).toUpperCase());
++      }
++      if (cidOf(resp) != mChannel) {
++        continue;
++      }
++      if (len < 1) {
++        return null;
++      }
++      final int take = Math.min(len, resp.remaining() - 5);
++      final byte[] bytes = new byte[take];
++      resp.position(5);
++      resp.get(bytes);
++      resp.position(0);
++      body.write(bytes, 0, bytes.length);
++      return body.toByteArray();
++    }
++  }
++
++  /**
++   * Sends {@code packet} and returns the payload of the next non-keepalive response matching
++   * {@code expectedCmd} on {@code expectedCid}, or null on failure. Used for INIT.
++   */
++  private byte[] transact(final ByteBuffer packet, final byte expectedCmd, final int expectedCid) {
++    if (!sendOut(packet)) {
++      return null;
++    }
++    while (true) {
++      final ByteBuffer resp = waitForIn();
++      if (resp == null) {
++        return null;
++      }
++      final byte cmdByte = resp.get(4);
++      final int len = bcntOf(resp);
++      if (cmdByte == CMD_KEEPALIVE) {
++        continue;
++      }
++      if (cmdByte == CMD_ERROR) {
++        final int code = len >= 1 ? resp.get(5) & 0xFF : -1;
++        throw new Ctap2Error("USB CTAPHID error 0x" + Integer.toHexString(code).toUpperCase());
++      }
++      if (cmdByte != expectedCmd || cidOf(resp) != expectedCid) {
++        continue;
++      }
++      if (len < 1) {
++        return null;
++      }
++      final int take = Math.min(len, resp.remaining() - 5);
++      final byte[] out = new byte[take];
++      for (int i = 0; i < take; i++) {
++        out[i] = resp.get(5 + i);
++      }
++      return out;
++    }
++  }
++
++  /** Queues the OUT request; the write completes once the report hits the bus. */
++  private boolean sendOut(final ByteBuffer packet) {
++    if (mOutRequest == null || mConnection == null) {
++      return false;
++    }
++    // Spec 8.1.4: unused bytes of the fixed-size report SHOULD be zero.
++    while (packet.hasRemaining()) {
++      packet.put((byte) 0);
++    }
++    packet.rewind();
++    try {
++      mOutRequest.queue(packet, mReportSize);
++    } catch (final Exception e) {
++      Log.e(TAG, "queue out failed", e);
++      return false;
++    }
++    while (true) {
++      final UsbRequest got = waitRequest(WAIT_TIMEOUT_MS);
++      if (got == null) {
++        return false;
++      }
++      if (got == mOutRequest) {
++        return true;
++      }
++      if (got == mInRequest) {
++        mInBuffer.rewind(); // response already arrived; kept for waitForIn
++      }
++    }
++  }
++
++  /**
++   * Queues the IN request and waits until one full report is received. Returns the buffer (rewound)
++   * or null on timeout/failure.
++   */
++  private ByteBuffer waitForIn() {
++    if (mInRequest == null || mConnection == null) {
++      return null;
++    }
++    mInBuffer.clear();
++    mInBuffer.limit(mReportSize);
++    try {
++      mInRequest.queue(mInBuffer, mReportSize);
++    } catch (final Exception e) {
++      Log.e(TAG, "queue in failed", e);
++      return null;
++    }
++    while (true) {
++      final UsbRequest got = waitRequest(PACKET_TIMEOUT_MS);
++      if (got == null) {
++        return null;
++      }
++      if (got == mInRequest) {
++        mInBuffer.rewind();
++        return mInBuffer;
++      }
++      // got == mOutRequest: a write finished; the IN packet is still due
++    }
++  }
++
++  private UsbRequest waitRequest(final long timeoutMs) {
++    if (mConnection == null) {
++      return null;
++    }
++    try {
++      return mConnection.requestWait(timeoutMs);
++    } catch (final Exception e) {
++      Log.e(TAG, "requestWait failed", e);
++      return null;
++    }
++  }
++
++  private ByteBuffer newOutPacket() {
++    mOutBuffer.clear();
++    mOutBuffer.limit(mReportSize);
++    mOutBuffer.order(ByteOrder.BIG_ENDIAN);
++    return mOutBuffer;
++  }
++
++  private static int cidOf(final ByteBuffer p) {
++    p.mark();
++    final int cid = p.getInt();
++    p.reset();
++    return cid;
++  }
++
++  /** BCNT field (bytes 5..6, big-endian) of a CTAPHID packet. */
++  private static int bcntOf(final ByteBuffer p) {
++    p.mark();
++    p.position(5);
++    final int hi = p.get() & 0xFF;
++    final int lo = p.get() & 0xFF;
++    p.reset();
++    return (hi << 8) | lo;
++  }
++
++  private static void putBcnt(final ByteBuffer p, final int len) {
++    p.put((byte) (len >> 8));
++    p.put((byte) (len & 0xFF));
++  }
++}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
+new file mode 100644
+@@ -0,0 +1,800 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++import android.annotation.SuppressLint;
++import android.app.Activity;
++import android.app.Application;
++import android.app.PendingIntent;
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.hardware.usb.UsbDevice;
++import android.hardware.usb.UsbManager;
++import android.nfc.Tag;
++import android.os.Build;
++import android.os.Handler;
++import android.os.Looper;
++import android.util.Log;
++import com.upokecenter.cbor.CBORObject;
++import java.lang.ref.WeakReference;
++import java.util.List;
++import java.util.concurrent.atomic.AtomicBoolean;
++import org.mozilla.gecko.GeckoAppShell;
++import org.mozilla.gecko.util.WebAuthnUtils;
++import org.mozilla.geckoview.GeckoResult;
++
++/**
++ * In-process FIDO2 ("Security Key") support for Gecko's Android WebAuthn backend, over USB
++ * (CTAPHID) and NFC (ISO-DEP), with no GMS/microG privileged FIDO service.
++ *
++ * <p>Replaces the {@code play-services-fido} PendingIntent flow in {@code WebAuthnTokenManager}:
++ * the challenge is answered directly by a roaming security key.
++ *
++ * <p>Design notes (browser case — differs from the Proton app flow this was ported from):
++ *
++ * <ul>
++ *   <li>Origin/clientDataJSON: the CTAP2 request is signed over {@code clientDataHash}, which
++ *       Gecko itself computes as SHA-256 of the spec-serialized clientDataJSON (with the RP
++ *       origin from the WebAuthn request) and passes into the Java seam. We reuse that hash and
++ *       leave the response's clientDataJson null so Gecko substitutes its own assembled copy —
++ *       no facet/APK-key-hash origin like the app case, and no second serializer to keep in
++ *       sync.
++ *   <li>Both makeCredential (enrollment) and getAssertion (sign-in) are implemented; the
++ *       transport command byte is generalized in the transports for exactly this.
++ *   <li>up is always required; uv is sent only when the request requires it, and rk only when a
++ *       resident credential is requested (an unrequested option risks
++ *       CTAP2_ERR_UNSUPPORTED_OPTION on plain keys).
++ *   <li>Transport selection is automatic and concurrent: a plugged-in USB key and an NFC tap are
++ *       both watched, first-wins; a key attached late is picked up by the attach receiver plus a
++ *       bounded deviceList poll (OS enumeration delay).
++ * </ul>
++ *
++ * <p>Blocking CTAP2 exchanges run on a daemon worker thread; all Android UI-touching steps
++ * (reader mode, permission dialog, receivers) run on the main thread.
++ *
++ * <p>Ported (Java) from the Proton Mail fork's fido-nfc module (GPL-3.0-or-later), with the
++ * browser-specific orchestration rewritten for the GeckoResult seam.
++ */
++public final class WebAuthnCtap2 {
++
++  private static final String LOGTAG = "GeckoCtap2";
++
++  private static final String USB_PERMISSION_ACTION = "org.mozilla.gecko.ctap2.USB_PERMISSION";
++  private static final int USB_VENDOR_YUBICO = 0x1050;
++  private static final long LATE_ATTACH_POLL_INTERVAL_MS = 1_000L;
++  private static final long LATE_ATTACH_WATCH_WINDOW_MS = 60_000L;
++  private static final long USB_GRANT_TIMEOUT_MS = 45_000L;
++  // Absolute watchdog for one operation (transport timeouts are shorter).
++  private static final long FLOW_WATCHDOG_MS = 90_000L;
++
++  private static final Object LOCK = new Object();
++  private static boolean sInFlight = false;
++
++  private static WeakReference<Activity> sResumedActivity = new WeakReference<>(null);
++  private static boolean sLifecycleHooked = false;
++
++  private static final Handler MAIN = new Handler(Looper.getMainLooper());
++
++  private WebAuthnCtap2() {}
++
++  // ---------------------------------------------------------------- entry points
++
++  /**
++   * Runs authenticatorMakeCredential on a security key (USB or NFC, first one available wins).
++   *
++   * @param clientDataHash SHA-256 of the request's clientDataJSON, as computed by Gecko
++   * @return the MakeCredentialResponse for Gecko; clientDataJson is deliberately null so Gecko
++   *     substitutes its own clientDataJSON
++   */
++  public static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredential(
++      final String rpId,
++      final String rpName,
++      final byte[] userId,
++      final String userName,
++      final String userDisplayName,
++      final byte[] clientDataHash,
++      final List<Ctap2Cbor.PublicKeyCredParam> pubKeyCredParams,
++      final List<Ctap2Cbor.CredentialId> excludeList,
++      final boolean residentKeyRequested,
++      final boolean userVerificationRequired,
++      final boolean reportCredProps) {
++    final Request request = new Request();
++    request.makeCredential = true;
++    request.rpId = rpId;
++    request.rpName = rpName;
++    request.userId = userId;
++    request.userName = userName;
++    request.userDisplayName = userDisplayName;
++    request.clientDataHash = clientDataHash;
++    request.pubKeyCredParams = pubKeyCredParams;
++    request.excludeList = excludeList;
++    request.residentKeyRequested = residentKeyRequested;
++    request.userVerificationRequired = userVerificationRequired;
++    request.reportCredProps = reportCredProps;
++    return start(request);
++  }
++
++  /**
++   * Runs authenticatorGetAssertion on a security key (USB or NFC, first one available wins).
++   *
++   * @param clientDataHash SHA-256 of the request's clientDataJSON, as computed by Gecko
++   */
++  public static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertion(
++      final String rpId,
++      final byte[] clientDataHash,
++      final List<Ctap2Cbor.CredentialId> allowList,
++      final String appId,
++      final boolean userVerificationRequired) {
++    final Request request = new Request();
++    request.makeCredential = false;
++    request.rpId = rpId;
++    request.clientDataHash = clientDataHash;
++    request.allowList = allowList;
++    request.appId = appId;
++    request.userVerificationRequired = userVerificationRequired;
++    return start(request);
++  }
++
++  // ---------------------------------------------------------------- flow state
++
++  private static final class Request {
++    boolean makeCredential;
++    String rpId;
++    String rpName;
++    byte[] userId;
++    String userName;
++    String userDisplayName;
++    byte[] clientDataHash;
++    List<Ctap2Cbor.PublicKeyCredParam> pubKeyCredParams;
++    List<Ctap2Cbor.CredentialId> excludeList;
++    List<Ctap2Cbor.CredentialId> allowList;
++    String appId;
++    boolean residentKeyRequested;
++    boolean userVerificationRequired;
++    boolean reportCredProps;
++  }
++
++  private static final class FlowState {
++    final Request request;
++    final GeckoResult<Object> result = new GeckoResult<>();
++    final AtomicBoolean settled = new AtomicBoolean(false);
++    // Claims the single transport worker for this flow (USB and NFC race to claim).
++    final AtomicBoolean transportClaimed = new AtomicBoolean(false);
++    NfcCtap2Transport.NfcReader nfcReader;
++    BroadcastReceiver permissionReceiver;
++    BroadcastReceiver attachReceiver;
++    Runnable grantTimeout;
++    Runnable watchdog;
++    Runnable poll;
++
++    FlowState(final Request request) {
++      this.request = request;
++    }
++
++    void settleSuccess(final Object value) {
++      if (!settled.compareAndSet(false, true)) {
++        return;
++      }
++      cleanup();
++      try {
++        result.complete(value);
++      } catch (final IllegalStateException e) {
++        // Result cancelled by Gecko in the meantime; nothing to deliver.
++        Log.d(LOGTAG, "result already complete at success time");
++      } finally {
++        finish();
++      }
++    }
++
++    void settleError(final WebAuthnUtils.Exception error) {
++      if (!settled.compareAndSet(false, true)) {
++        return;
++      }
++      cleanup();
++      try {
++        result.completeExceptionally(error);
++      } catch (final IllegalStateException e) {
++        // Result cancelled by Gecko in the meantime; nothing to deliver.
++        Log.d(LOGTAG, "result already complete at error time");
++      } finally {
++        finish();
++      }
++    }
++
++    private void finish() {
++      synchronized (LOCK) {
++        sInFlight = false;
++      }
++    }
++
++    void cleanup() {
++      MAIN.removeCallbacks(grantTimeout);
++      MAIN.removeCallbacks(watchdog);
++      MAIN.removeCallbacks(poll);
++      final Context ctx = GeckoAppShell.getApplicationContext();
++      if (permissionReceiver != null) {
++        try {
++          ctx.unregisterReceiver(permissionReceiver);
++        } catch (final Exception e) {
++          // already unregistered
++        }
++        permissionReceiver = null;
++      }
++      if (attachReceiver != null) {
++        try {
++          ctx.unregisterReceiver(attachReceiver);
++        } catch (final Exception e) {
++          // already unregistered
++        }
++        attachReceiver = null;
++      }
++      final Activity activity = sResumedActivity.get();
++      if (nfcReader != null && activity != null) {
++        nfcReader.stop(activity);
++      }
++      nfcReader = null;
++    }
++  }
++
++  /**
++   * Arms both transports (or the already-present one) and returns the pending result. First
++   * transport to become available wins; the CTAP2 exchange then runs on a worker thread.
++   */
++  private static <T> GeckoResult<T> start(final Request request) {
++    synchronized (LOCK) {
++      if (sInFlight) {
++        return GeckoResult.fromException(new WebAuthnUtils.Exception("INVALID_STATE_ERR"));
++      }
++      sInFlight = true;
++    }
++    final FlowState flow = new FlowState(request);
++    MAIN.post(
++        () -> {
++          try {
++            arm(flow);
++          } catch (final Exception e) {
++            Log.e(LOGTAG, "failed to arm security-key flow", e);
++            flow.settleError(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++          }
++        });
++    @SuppressWarnings("unchecked")
++    final GeckoResult<T> typed = (GeckoResult<T>) flow.result;
++    return typed;
++  }
++
++  /** Main thread: fast-path an attached USB key, else arm NFC + late-USB watch. */
++  private static void arm(final FlowState flow) {
++    ensureActivityTracking();
++
++    flow.watchdog = () -> flow.settleError(new WebAuthnUtils.Exception("TIMEOUT_ERR"));
++    MAIN.postDelayed(flow.watchdog, FLOW_WATCHDOG_MS);
++
++    final UsbDevice attached = findUsbSecurityKey();
++    if (attached != null) {
++      if (hasUsbPermission(attached)) {
++        Log.i(LOGTAG, "USB security key attached; using it directly");
++        startUsbFlow(flow, attached);
++      } else {
++        requestUsbPermission(flow, attached);
++      }
++      return;
++    }
++
++    // No key yet: watch NFC and USB at once, first-wins.
++    final Activity activity = sResumedActivity.get();
++    if (activity != null) {
++      final NfcCtap2Transport.NfcReader reader =
++          new NfcCtap2Transport.NfcReader(tag -> onTag(flow, tag));
++      if (reader.start(activity)) {
++        flow.nfcReader = reader;
++      } else {
++        Log.d(LOGTAG, "NFC reader mode unavailable; watching USB only");
++      }
++    } else {
++      Log.d(LOGTAG, "no resumed activity; watching USB only");
++    }
++    startLateUsbWatch(flow);
++  }
++
++  /** Main thread: an NFC tag was tapped — USB must not start a second flow. */
++  private static void onTag(final FlowState flow, final Tag tag) {
++    if (flow.settled.get() || !flow.transportClaimed.compareAndSet(false, true)) {
++      return;
++    }
++    // Claim the flow before tearing the arm down: nothing else can win now.
++    if (flow.nfcReader != null) {
++      final Activity activity = sResumedActivity.get();
++      if (activity != null) {
++        flow.nfcReader.stop(activity);
++      }
++    }
++    unregisterAttachReceiver(flow);
++    MAIN.removeCallbacks(flow.poll);
++    MAIN.removeCallbacks(flow.grantTimeout);
++
++    final Thread worker =
++        new Thread(
++            () -> {
++              final NfcCtap2Transport transport = new NfcCtap2Transport();
++              Ctap2Session session;
++              try {
++                if (!transport.bindTag(tag)) {
++                  throw new Ctap2Error("the tag does not support contactless (IsoDep) exchange");
++                }
++                session = new NfcSession(transport);
++              } catch (final Ctap2Error e) {
++                transport.release();
++                flow.settleError(mapError(e));
++                return;
++              }
++              runExchange(flow, session);
++            },
++            "GeckoCtap2Nfc");
++    worker.setDaemon(true);
++    worker.start();
++  }
++
++  /** Starts the USB CTAP2 exchange for {@code device} (permission already granted). */
++  private static void startUsbFlow(final FlowState flow, final UsbDevice device) {
++    if (flow.settled.get() || !flow.transportClaimed.compareAndSet(false, true)) {
++      return;
++    }
++    stopLateUsbWatch(flow);
++    unregisterPermissionReceiver(flow);
++    final Activity activity = sResumedActivity.get();
++    if (flow.nfcReader != null && activity != null) {
++      flow.nfcReader.stop(activity);
++    }
++    final Thread worker =
++        new Thread(
++            () -> {
++              final UsbCtap2Transport transport = new UsbCtap2Transport();
++              final UsbManager usb =
++                  (UsbManager)
++                      GeckoAppShell.getApplicationContext()
++                          .getSystemService(Context.USB_SERVICE);
++              if (usb == null || !transport.bindDevice(device, usb)) {
++                transport.release();
++                flow.settleError(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++                return;
++              }
++              runExchange(flow, new UsbSession(transport));
++            },
++            "GeckoCtap2Usb");
++    worker.setDaemon(true);
++    worker.start();
++  }
++
++  /**
++   * Requests USB access through the system dialog. FLAG_UPDATE_CURRENT, never FLAG_NO_CREATE:
++   * with FLAG_NO_CREATE the first call returns a null PendingIntent and the dialog would be
++   * started without a response channel.
++   */
++  @SuppressLint("UnspecifiedRegisterReceiverFlag")
++  private static void requestUsbPermission(final FlowState flow, final UsbDevice device) {
++    final Context ctx = GeckoAppShell.getApplicationContext();
++    final UsbManager usb = (UsbManager) ctx.getSystemService(Context.USB_SERVICE);
++    if (usb == null) {
++      flow.settleError(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++      return;
++    }
++    final BroadcastReceiver receiver =
++        new BroadcastReceiver() {
++          @Override
++          public void onReceive(final Context c, final Intent intent) {
++            unregisterPermissionReceiver(flow);
++            if (!intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
++              Log.i(LOGTAG, "USB access was not granted");
++              flow.settleError(new WebAuthnUtils.Exception("NOT_ALLOWED_ERR"));
++              return;
++            }
++            Log.i(LOGTAG, "USB access granted; starting USB flow");
++            startUsbFlow(flow, device);
++          }
++        };
++    flow.permissionReceiver = receiver;
++    // FLAG_UPDATE_CURRENT, never FLAG_NO_CREATE (see above).
++    final int piFlags = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT;
++    final Intent intent = new Intent(USB_PERMISSION_ACTION).setPackage(ctx.getPackageName());
++    final PendingIntent pending = PendingIntent.getBroadcast(ctx, 0, intent, piFlags);
++    final IntentFilter filter = new IntentFilter(USB_PERMISSION_ACTION);
++    final Activity activity = sResumedActivity.get();
++    try {
++      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++        if (activity != null) {
++          activity.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
++        } else {
++          ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
++        }
++      } else if (activity != null) {
++        activity.registerReceiver(receiver, filter);
++      } else {
++        ctx.registerReceiver(receiver, filter);
++      }
++    } catch (final Exception e) {
++      Log.e(LOGTAG, "registerReceiver (USB permission) failed", e);
++    }
++    try {
++      usb.requestPermission(device, pending);
++    } catch (final Exception e) {
++      Log.e(LOGTAG, "requestPermission failed", e);
++      flow.settleError(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++      return;
++    }
++    flow.grantTimeout =
++        () -> {
++          if (flow.permissionReceiver != null) {
++            Log.i(LOGTAG, "USB permission dialog did not complete in time");
++            flow.settleError(new WebAuthnUtils.Exception("NOT_ALLOWED_ERR"));
++          }
++        };
++    MAIN.postDelayed(flow.grantTimeout, USB_GRANT_TIMEOUT_MS);
++  }
++
++  private static void unregisterPermissionReceiver(final FlowState flow) {
++    MAIN.removeCallbacks(flow.grantTimeout);
++    if (flow.permissionReceiver != null) {
++      try {
++        GeckoAppShell.getApplicationContext().unregisterReceiver(flow.permissionReceiver);
++      } catch (final Exception e) {
++        // already unregistered
++      }
++      flow.permissionReceiver = null;
++    }
++  }
++
++  /**
++   * Arms the late-attach watch so a USB key plugged in after the prompt can still win:
++   * ACTION_USB_DEVICE_ATTACHED (primary) plus a bounded deviceList poll (some devices take
++   * seconds to enumerate). Both stop when a transport wins; the poll stops after the window.
++   */
++  @SuppressLint("UnspecifiedRegisterReceiverFlag")
++  private static void startLateUsbWatch(final FlowState flow) {
++    final BroadcastReceiver receiver =
++        new BroadcastReceiver() {
++          @Override
++          public void onReceive(final Context c, final Intent intent) {
++            final UsbDevice device = getUsbDeviceExtra(intent);
++            if (device == null || device.getVendorId() != USB_VENDOR_YUBICO) {
++              return;
++            }
++            onLateUsbAttach(flow, device);
++          }
++        };
++    flow.attachReceiver = receiver;
++    final Context ctx = GeckoAppShell.getApplicationContext();
++    final IntentFilter filter = new IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED);
++    try {
++      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++        ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
++      } else {
++        ctx.registerReceiver(receiver, filter);
++      }
++    } catch (final Exception e) {
++      Log.e(LOGTAG, "registerReceiver (USB attach) failed", e);
++    }
++    final long startMs = System.currentTimeMillis();
++    flow.poll =
++        new Runnable() {
++          @Override
++          public void run() {
++            if (flow.settled.get()) {
++              return;
++            }
++            final UsbDevice device = findUsbSecurityKey();
++            if (device != null) {
++              onLateUsbAttach(flow, device);
++            } else if (System.currentTimeMillis() - startMs < LATE_ATTACH_WATCH_WINDOW_MS) {
++              MAIN.postDelayed(this, LATE_ATTACH_POLL_INTERVAL_MS);
++            }
++          }
++        };
++    MAIN.postDelayed(flow.poll, LATE_ATTACH_POLL_INTERVAL_MS);
++  }
++
++  /** A YubiKey attached while the flow is active: USB wins the race. */
++  private static void onLateUsbAttach(final FlowState flow, final UsbDevice device) {
++    if (flow.settled.get() || flow.permissionReceiver != null) {
++      // settled already, or a permission dialog is up for this flow already
++      return;
++    }
++    Log.i(LOGTAG, "USB key attached during flow; switching NFC -> USB");
++    final Activity activity = sResumedActivity.get();
++    if (flow.nfcReader != null && activity != null) {
++      flow.nfcReader.stop(activity);
++    }
++    unregisterAttachReceiver(flow);
++    MAIN.removeCallbacks(flow.poll);
++    if (hasUsbPermission(device)) {
++      startUsbFlow(flow, device);
++    } else {
++      requestUsbPermission(flow, device);
++    }
++  }
++
++  private static void unregisterAttachReceiver(final FlowState flow) {
++    if (flow.attachReceiver != null) {
++      try {
++        GeckoAppShell.getApplicationContext().unregisterReceiver(flow.attachReceiver);
++      } catch (final Exception e) {
++        // already unregistered
++      }
++      flow.attachReceiver = null;
++    }
++  }
++
++  private static void stopLateUsbWatch(final FlowState flow) {
++    unregisterAttachReceiver(flow);
++    MAIN.removeCallbacks(flow.poll);
++  }
++
++  // ---------------------------------------------------------------- exchange
++
++  /** Worker thread: prepare the session and run the CTAP2 command for {@code flow}. */
++  private static void runExchange(final FlowState flow, final Ctap2Session session) {
++    final Request request = flow.request;
++    try {
++      if (!session.prepare()) {
++        throw new Ctap2Error("could not reach the FIDO2 authenticator on the security key");
++      }
++      final Object response =
++          request.makeCredential
++              ? doMakeCredential(request, session)
++              : doGetAssertion(request, session);
++      flow.settleSuccess(response);
++    } catch (final Exception e) {
++      Log.e(LOGTAG, "security key operation failed", e);
++      flow.settleError(mapError(e));
++    } finally {
++      try {
++        session.close();
++      } catch (final Exception e) {
++        // best-effort
++      }
++    }
++  }
++
++  private static WebAuthnUtils.MakeCredentialResponse doMakeCredential(
++      final Request request, final Ctap2Session session) {
++    final byte[] cbor =
++        Ctap2Cbor.encodeMakeCredential(
++            request.clientDataHash,
++            request.rpId,
++            request.rpName,
++            request.userId,
++            request.userName,
++            request.userDisplayName,
++            request.pubKeyCredParams,
++            request.excludeList,
++            request.residentKeyRequested,
++            request.userVerificationRequired);
++    final Ctap2Cbor.MakeCredentialResponse ctap =
++        Ctap2Cbor.decodeMakeCredential(
++            session.send(Ctap2Session.CTAP_MAKE_CREDENTIAL, cbor));
++    final WebAuthnUtils.MakeCredentialResponse.Builder builder =
++        new WebAuthnUtils.MakeCredentialResponse.Builder()
++            .setKeyHandle(extractCredentialId(ctap.authData))
++            .setClientDataJson(null)
++            .setAttestationObject(ctap.attestationObject)
++        .setTransports(new String[] {"usb", "nfc"})
++        .setAuthenticatorAttachment("cross-platform");
++    if (request.reportCredProps) {
++      // Best effort: report the rk option we actually sent.
++      builder.setCredProps(request.residentKeyRequested);
++    }
++    return builder.build();
++  }
++
++  private static WebAuthnUtils.GetAssertionResponse doGetAssertion(
++      final Request request, final Ctap2Session session) {
++    // WebAuthn L2 10.1 (appid): the AppID replaces the RP id in the CTAP2 request so legacy
++    // U2F credentials (scoped to the AppID) match; clientDataHash still covers the real origin.
++    final String rpIdForKey =
++        request.appId != null && !request.appId.isEmpty() ? request.appId : request.rpId;
++    final byte[] cbor =
++        Ctap2Cbor.encodeGetAssertion(
++            rpIdForKey,
++            request.clientDataHash,
++            request.allowList,
++            request.appId,
++            request.userVerificationRequired);
++    final Ctap2Cbor.GetAssertionResponse ctap =
++        Ctap2Cbor.decodeGetAssertion(
++            session.send(Ctap2Session.CTAP_GET_ASSERTION, cbor), request.allowList);
++    return new WebAuthnUtils.GetAssertionResponse.Builder()
++        .setClientDataJson(null)
++        .setKeyHandle(ctap.credentialId)
++        .setAuthData(ctap.authenticatorData)
++        .setSignature(ctap.signature)
++        .setUserHandle(ctap.userHandle)
++        .setAuthenticatorAttachment("cross-platform")
++        .build();
++  }
++
++  /**
++   * The credential id lives in the authenticator data: after rpIdHash(32) flags(1) signCount(4)
++   * aaguid(16) comes credIdLen(2) credId, present whenever the AT flag 0x40 is set (always the
++   * case for a makeCredential response).
++   */
++  private static byte[] extractCredentialId(final byte[] authData) {
++    if (authData != null
++        && authData.length >= 55
++        && (authData[32] & 0x40) != 0) {
++      final int credIdLen = ((authData[53] & 0xFF) << 8) | (authData[54] & 0xFF);
++      if (authData.length >= 55 + credIdLen) {
++        final byte[] id = new byte[credIdLen];
++        System.arraycopy(authData, 55, id, 0, credIdLen);
++        return id;
++      }
++    }
++    return new byte[0];
++  }
++
++  // ---------------------------------------------------------------- helpers
++
++  private static UsbDevice findUsbSecurityKey() {
++    final Context ctx = GeckoAppShell.getApplicationContext();
++    final UsbManager usb = (UsbManager) ctx.getSystemService(Context.USB_SERVICE);
++    if (usb == null) {
++      return null;
++    }
++    for (final UsbDevice device : usb.getDeviceList().values()) {
++      if (device.getVendorId() == USB_VENDOR_YUBICO) {
++        return device;
++      }
++    }
++    return null;
++  }
++
++  private static boolean hasUsbPermission(final UsbDevice device) {
++    final Context ctx = GeckoAppShell.getApplicationContext();
++    final UsbManager usb = (UsbManager) ctx.getSystemService(Context.USB_SERVICE);
++    return usb != null && usb.hasPermission(device);
++  }
++
++  @SuppressWarnings("deprecation")
++  private static UsbDevice getUsbDeviceExtra(final Intent intent) {
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++      return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice.class);
++    }
++    return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
++  }
++
++  /**
++   * Maps CTAP2 status codes (spec section 6.1) and transport failures to the WebAuthn error names
++   * Gecko's AndroidWebAuthnService understands. Presence/consent failures map to NOT_ALLOWED_ERR
++   * per the WebAuthn spec.
++   */
++  private static WebAuthnUtils.Exception mapError(final Throwable ex) {
++    final int status = ex instanceof Ctap2Error ? ((Ctap2Error) ex).getCtapStatus() : 0;
++    switch (status) {
++      case 0x11: // CBOR_UNEXPECTED_TYPE
++      case 0x12: // INVALID_CBOR
++      case 0x14: // MISSING_PARAMETER
++        return new WebAuthnUtils.Exception("ENCODING_ERR");
++      case 0x16: // UNSUPPORTED_EXTENSION
++      case 0x26: // UNSUPPORTED_ALGORITHM
++      case 0x2B: // UNSUPPORTED_OPTION
++      case 0x2C: // INVALID_OPTION
++      case 0x39: // REQUEST_TOO_LARGE
++        return new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR");
++      case 0x19: // CREDENTIAL_EXCLUDED (already registered)
++        return new WebAuthnUtils.Exception("INVALID_STATE_ERR");
++      case 0x2E: // NO_CREDENTIALS
++      case 0x2D: // KEEPALIVE_CANCEL
++      case 0x27: // OPERATION_DENIED
++        return new WebAuthnUtils.Exception("NOT_ALLOWED_ERR");
++      case 0x2F: // USER_ACTION_TIMEOUT
++      case 0x3A: // ACTION_TIMEOUT
++        return new WebAuthnUtils.Exception("TIMEOUT_ERR");
++      default:
++        Log.w(LOGTAG, "security key failure: " + ex.getMessage());
++        return new WebAuthnUtils.Exception("NOT_ALLOWED_ERR");
++    }
++  }
++
++  // ---------------------------------------------------------------- activity tracking
++
++  /**
++   * Tracks the resumed Activity from the application context: NFC reader mode and the
++   * permission/attach receivers are scoped to it. Registered lazily, once, on the main thread.
++   */
++  private static void ensureActivityTracking() {
++    if (sLifecycleHooked) {
++      return;
++    }
++    final Context ctx = GeckoAppShell.getApplicationContext();
++    if (!(ctx instanceof Application)) {
++      return;
++    }
++    ((Application) ctx)
++        .registerActivityLifecycleCallbacks(
++            new Application.ActivityLifecycleCallbacks() {
++              @Override
++              public void onActivityResumed(final Activity activity) {
++                sResumedActivity = new WeakReference<>(activity);
++              }
++
++              @Override
++              public void onActivityPaused(final Activity activity) {
++                final Activity tracked = sResumedActivity.get();
++                if (tracked == activity) {
++                  sResumedActivity = new WeakReference<>(null);
++                }
++              }
++
++              @Override
++              public void onActivityCreated(
++                  final Activity activity, final android.os.Bundle savedInstanceState) {}
++
++              @Override
++              public void onActivityStarted(final Activity activity) {}
++
++              @Override
++              public void onActivityStopped(final Activity activity) {}
++
++              @Override
++              public void onActivitySaveInstanceState(
++                  final Activity activity, final android.os.Bundle outState) {}
++
++              @Override
++              public void onActivityDestroyed(final Activity activity) {}
++            });
++    sLifecycleHooked = true;
++  }
++
++  // ---------------------------------------------------------------- sessions
++
++  private static final class NfcSession implements Ctap2Session {
++    private final NfcCtap2Transport mTransport;
++
++    NfcSession(final NfcCtap2Transport transport) {
++      mTransport = transport;
++    }
++
++    @Override
++    public boolean prepare() {
++      return mTransport.selectFidoApplet();
++    }
++
++    @Override
++    public byte[] send(final int ctapCmd, final byte[] cbor) {
++      return mTransport.sendCtapCommand(ctapCmd, cbor);
++    }
++
++    @Override
++    public void close() {
++      mTransport.release();
++    }
++  }
++
++  private static final class UsbSession implements Ctap2Session {
++    private final UsbCtap2Transport mTransport;
++
++    UsbSession(final UsbCtap2Transport transport) {
++      mTransport = transport;
++    }
++
++    @Override
++    public boolean prepare() {
++      if (!mTransport.initialize()) {
++        throw new Ctap2Error("the USB security key did not respond (channel allocation failed)");
++      }
++      return true;
++    }
++
++    @Override
++    public byte[] send(final int ctapCmd, final byte[] cbor) {
++      return mTransport.sendCtapCommand(ctapCmd, cbor);
++    }
++
++    @Override
++    public void close() {
++      mTransport.release();
++    }
++  }
++}

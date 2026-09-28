@@ -1,0 +1,39 @@
+diff --git a/config/makefiles/rust.mk b/config/makefiles/rust.mk
+index b9526fb059..fdbf8dc35b 100644
+--- a/config/makefiles/rust.mk
++++ b/config/makefiles/rust.mk
+@@ -85,19 +85,10 @@ ifndef DEVELOPER_OPTIONS
+ ifndef MOZ_DEBUG_RUST
+ # Enable link-time optimization for release builds, but not when linking
+ # gkrust_gtest. And not when doing cross-language LTO.
+-ifndef MOZ_LTO_RUST_CROSS
+-# Never enable when sancov is enabled to work around https://github.com/rust-lang/rust/issues/90300.
+-ifeq (,$(RUST_SANCOV_FLAGS))
+-# Never enable when coverage is enabled to work around https://github.com/rust-lang/rust/issues/90045.
+-ifndef MOZ_CODE_COVERAGE
+-ifeq (,$(findstring gkrust_gtest,$(RUST_LIBRARY_FILE)))
+-cargo_rustc_flags += -Clto$(if $(filter full,$(MOZ_LTO_RUST_CROSS)),=fat)
+-endif
+-# We need -Cembed-bitcode=yes for all crates when using -Clto.
+-RUSTFLAGS += -Cembed-bitcode=yes
+-endif
+-endif
+-endif
++# Disabled for this build: fat LTO on an 874-crate workspace makes the
++# top-level crate's codegen a ~10 GiB job that does not fit the build
++# machine. The trade is final binary size/speed for a build that
++# completes; restore this block when building on a bigger machine.
+ endif
+ endif
+ 
+@@ -324,7 +315,9 @@ $(HOST_RECIPES): RUSTFLAGS:=$(rustflags_override)
+ # crate. This results in better optimization and less code duplication at the
+ # cost of longer compile times.
+ ifndef DEVELOPER_OPTIONS
+-$(TARGET_RECIPES) $(HOST_RECIPES): RUSTFLAGS += -C codegen-units=1
++# Not for this build: one codegen unit for a crate the size of
++# geckoservo is a single ~10 GiB rustc job. rustc's default
++# split is used instead.
+ endif
+ 
+ # We use the + prefix to pass down the jobserver fds to cargo, but we

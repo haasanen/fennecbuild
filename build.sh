@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #    Fennec build scripts
-#    Copyright (C) 2020-2024  Matías Zúñiga, Andrew Nayenko, Tavi
+#    Copyright (C) 2020  Matías Zúñiga, Andrew Nayenko
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as
@@ -26,105 +26,53 @@ source "$(dirname "$0")/paths.sh"
 # auto-publication workflow because the latter does not work for Gradle
 # plugins (Glean).
 
-# Set up Android SDK for GeckoView
-sdkmanager 'build-tools;37.0.0'
-sdkmanager 'platform-tools;37.0.0'
-
-# Install some Android SDK components manually, see
-# https://gitlab.com/fdroid/sdkmanager/-/work_items/31
-if [ ! -e /opt/android-sdk/cmdline-tools/21.0 ]; then
-    curl --silent -O https://dl.google.com/android/repository/commandlinetools-linux-15641748_latest.zip
-    echo 'a66d5ef0238fc0162e9c1446602ce0dd41702d4dd7a94d2ce42d12b7f80baf7e  commandlinetools-linux-15641748_latest.zip' | shasum -c
-    unzip -q commandlinetools-linux-15641748_latest.zip
-    mkdir -p /opt/android-sdk/cmdline-tools/
-    mv cmdline-tools /opt/android-sdk/cmdline-tools/21.0
-fi
-if [ ! -e /opt/android-sdk/platforms/android-37.1 ]; then
-    curl --silent -O https://dl.google.com/android/repository/platform-37.1_r01.zip
-    echo 'cadf0a541847820ea3d8ffc5c192562a18376cf9ba510bf9659c772f9a442184  platform-37.1_r01.zip' | shasum -c
-    unzip -q platform-37.1_r01.zip
-    mkdir -p /opt/android-sdk/platforms/
-    mv android-37.1 /opt/android-sdk/platforms/android-37.1
-fi
-
 # Set up Rust
-cargo install --force --vers 0.29.4 cbindgen
+"$rustup"/rustup-init.sh -y
+# shellcheck disable=SC1090
+source "$HOME/.cargo/env"
+rustup default 1.46.0
+rustup target add thumbv7neon-linux-androideabi
+rustup target add armv7-linux-androideabi
+rustup target add aarch64-linux-android
+cargo install --force --vers 0.14.5 cbindgen
 
-# Build LLVM
-pushd "$llvm"
-llvmtarget=$(cat "$llvm/targets_to_build")
-cmake -S llvm -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=out -DCMAKE_C_COMPILER=clang \
-    -DCMAKE_CXX_COMPILER=clang++ -DLLVM_ENABLE_PROJECTS="clang" -DLLVM_TARGETS_TO_BUILD="$llvmtarget" \
-    -DLLVM_USE_LINKER=lld -DLLVM_BINUTILS_INCDIR=/usr/include -DLLVM_ENABLE_PLUGINS=FORCE_ON \
-    -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-unknown-linux-gnu"
-cmake --build build -j"$(nproc)"
-cmake --build build --target install -j"$(nproc)"
+# Set up Python
+PYENV_ROOT=$(realpath "$pyenv")
+export PATH="$PYENV_ROOT/bin:$PATH"
+export PYENV_ROOT
+eval "$(pyenv init -)"
+pyenv install 3.8.5
+pyenv global 3.8.5
+
+pushd "$mozilla_release"
+LLVM_OBJDUMP=$(command -v llvm-objdump-6.0)
+export LLVM_OBJDUMP
+export MACH_USE_SYSTEM_PYTHON=yes
+./mach build
+gradle publishWithGeckoBinariesReleasePublicationToMavenLocal
 popd
 
-# Build WASI SDK
-pushd "$wasi"
-mkdir -p build/install/wasi
-touch build/compiler-rt.BUILT # fool the build system
-make \
-    PREFIX=/wasi \
-    build/wasi-libc.BUILT \
-    build/libcxx.BUILT \
-    -j"$(nproc)"
-popd
-
-# Build microG libraries
-pushd "$gmscore"
-gradle -x javaDocReleaseGeneration \
-    :play-services-ads-identifier:publishToMavenLocal \
-    :play-services-base:publishToMavenLocal \
-    :play-services-basement:publishToMavenLocal \
-    :play-services-fido:publishToMavenLocal \
-    :play-services-tasks:publishToMavenLocal
-popd
-
-pushd "$glean"
+pushd "$glean_as"
 export TARGET_CFLAGS=-DNDEBUG
 gradle publishToMavenLocal
 popd
 
-pushd "$glean_as"
+pushd "$glean"
 gradle publishToMavenLocal
 popd
 
-pushd "$mozilla_release"
-./mach build
-./mach package
-read -ra locales < "$patches/locales"
-./mach package-multi-locale --locales "${locales[@]}"
-MOZ_CHROME_MULTILOCALE=${locales[*]}
-export MOZ_CHROME_MULTILOCALE
-gradle -x javadocRelease :geckoview:publishReleasePublicationToMavenLocal
-popd
-
-pushd "$android_components"
-# Viaduct from A-S requires concept-fetch 150.0.3 built with compileSdk 36.1.
-# Build such a copy of concept-fetch from the current A-C source code
-echo 150.0.3 > ../version.txt
-sed -i -e '/compileSdkMajorVersion/s/37/36/' .config.yml
-gradle :components:concept-fetch:publishToMavenLocal
-git checkout .config.yml ../version.txt
-# Required by UnifiedPush
-gradle :components:{concept-base,concept-fetch,support-base,ui-icons}:publishToMavenLocal
+pushd "$android_components_as"
+gradle publishToMavenLocal
 popd
 
 pushd "$application_services"
+export ANDROID_NDK_ROOT="$ANDROID_NDK"
+export SQLCIPHER_LIB_DIR="$application_services/libs/desktop/linux-x86-64/sqlcipher/lib"
+export SQLCIPHER_INCLUDE_DIR="$application_services/libs/desktop/linux-x86-64/sqlcipher/include"
 export NSS_DIR="$application_services/libs/desktop/linux-x86-64/nss"
 export NSS_STATIC=1
+./libs/verify-desktop-environment.sh
 ./libs/verify-android-environment.sh
-gradle publishToMavenLocal
-# Build and install nimbus-fml manually
-pushd components/support/nimbus-fml
-cargo build --release
-popd
-mv target/release/nimbus-fml "$mozilla_release/obj/dist/host/bin/nimbus-fml"
-popd
-
-pushd "$unifiedpush_ac"
 gradle publishToMavenLocal
 popd
 
@@ -132,6 +80,4 @@ pushd "$android_components"
 gradle publishToMavenLocal
 popd
 
-pushd "$fenix"
 gradle assembleRelease
-popd

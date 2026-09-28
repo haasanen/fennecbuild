@@ -243,6 +243,12 @@ apply_patch "$patches/gecko-prevent-fingerprinting-via-crash-resources.patch"
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1994063
 apply_patch "$patches/gecko-unbreak-wasi-sdk-20-clang.patch"
 
+# Keep the Rust build inside the 15 GiB build machine: drop fat LTO and the
+# codegen-units=1 release setting (a single geckoservo codegen is a ~10 GiB
+# rustc job with both on). Final binary is slower/bigger — restore on a
+# bigger machine.
+apply_patch "$patches/gecko-rust-small-memory.patch"
+
 # Add "marionette.hide" option into about:config
 apply_patch "$patches/gecko-option-to-hide-marionette.patch"
 
