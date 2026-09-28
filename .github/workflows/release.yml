@@ -581,7 +581,11 @@ jobs:
           APKDIR=../srclib/MozFennec/obj/gradle/build/mobile/android/fenix/app/outputs/apk/release
           ls -la "$APKDIR"
           shopt -s nullglob
-          apks=("$APKDIR"/app-*-release-unsigned.apk)
+          # Fennec's release build is unsigned by default and is named
+          # app-<abi>-release.apk (no "unsigned" suffix). Fallback keeps
+          # the older app-*-release-unsigned.apk shape for safety.
+          apks=("$APKDIR"/app-*arm64*release*.apk)
+          [ ${#apks[@]} -gt 0 ] || apks=("$APKDIR"/app-*-release-unsigned.apk)
           [ ${#apks[@]} -gt 0 ] || { echo "NO APK FOUND"; exit 1; }
           # arm64 for the Pixel 8a
           pick=""
