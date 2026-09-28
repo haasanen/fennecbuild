@@ -1,5 +1,5 @@
 diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
-index 0000000..1111111 100644
+index 79cace68f5ffcbc6fef93b8e85626c3f34b264f4..71adba1b96105c268388391c1b52d33de0ae8c80 100644
 --- a/mobile/android/geckoview/build.gradle
 +++ b/mobile/android/geckoview/build.gradle
 @@ -194,7 +194,7 @@
@@ -12,7 +12,7 @@ index 0000000..1111111 100644
  
      if (mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 0000000..1111111 100644
+index a4a67c769ce3b144d05b7c88788313ac48160666..2e5436898c1f2e170d5f8f3d1b7971c064620877 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
 @@ -3,6 +3,10 @@
@@ -35,7 +35,7 @@ index 0000000..1111111 100644
  ksp-symbol-processing-aa = { module = "com.google.devtools.ksp:symbol-processing-aa", version.ref = "ksp" }
  ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "ksp" }
 diff --git a/mobile/android/geckoview/src/main/AndroidManifest.xml b/mobile/android/geckoview/src/main/AndroidManifest.xml
-index 0000000..1111111 100644
+index 83bfdf85e6283aa6f3cdcb593fcef1e887e385b5..186a662b159aaa71757e13bbae6bfcf50ac3d824 100644
 --- a/mobile/android/geckoview/src/main/AndroidManifest.xml
 +++ b/mobile/android/geckoview/src/main/AndroidManifest.xml
 @@ -10,6 +10,8 @@
@@ -62,7 +62,7 @@ index 0000000..1111111 100644
              android:name="android.hardware.camera.autofocus"
              android:required="false"/>
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
-index 0000000..1111111 100644
+index efb17c0e3b2accc230a3f7f32a7c9d14c73f4ed9..54872b22334cc861419af1a10c1998594cae6725 100644
 --- a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
 @@ -5,48 +5,18 @@
@@ -816,7 +816,7 @@ index 0000000..1111111 100644
    }
  }
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
-index 0000000..1111111 100644
+index d48fe66c43763d5f4bbdae292ac74bd875a98127..7b7b27309cbb566e2b9ec1ed70db33f72a05069c 100644
 --- a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
 @@ -7,7 +7,6 @@
@@ -855,7 +855,7 @@ index 0000000..1111111 100644
      final JSONArray json = new JSONArray();
      if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
-index 0000000..1111111 100644
+index 85a42de77b1230084a2b26c7fd8f6115b9c03203..a4c9f5e319a7ad1a1d5ac7794e002e47059da681 100644
 --- a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
 @@ -6,7 +6,6 @@
