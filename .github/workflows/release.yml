@@ -553,11 +553,12 @@ jobs:
           key: fennec-tests-v1-${{ steps.tfp.outputs.fingerprint }}
 
       - name: Test GeckoView (unit suite, fingerprint gate)
-        # Runs :geckoview:testReleaseUnitTest ONLY when the fingerprint
-        # cache is missing. Covers the CTAP2/CBOR wire-format tests
-        # (Ctap2CborTest) plus the geckoview util tests. Needs obj/ (mozconfig
-        # + JNI), which exists from the completion gate up — same state the
-        # publish step above used.
+        # Runs :geckoview:testDebugUnitTest ONLY when the fingerprint
+        # cache is missing. (AGP 9 removed the release variant unit-test
+        # task; debug is the standard unit-test variant.) Covers the
+        # CTAP2/CBOR wire-format tests (Ctap2CborTest) plus the geckoview
+        # util tests. Needs obj/ (mozconfig + JNI), which exists from the
+        # completion gate up — same state the publish step above used.
         run: |
           chmod +x .github/workflows/test_fingerprint_gate.sh
           bash .github/workflows/test_fingerprint_gate.sh gecko_gv "${{ steps.tfp.outputs.fingerprint }}"
@@ -585,8 +586,9 @@ jobs:
         run: bash .github/workflows/run_p3_stage.sh "upush ac" p3d
 
       - name: Test Fenix app (unit suite, fingerprint gate)
-        # Runs :app:testReleaseUnitTest (the full fenix unit suite) ONLY when
-        # the fingerprint cache is missing. Placed after the AC publish and
+        # Runs :app:testDebugUnitTest (the full fenix unit suite) ONLY when
+        # the fingerprint cache is missing. (AGP 9 removed the release
+        # variant unit-test task; debug is the standard unit-test variant.) Placed after the AC publish and
         # BEFORE the fenix compile: the tests prove the source works before
         # 2.5 h of compilation is spent on it, and any failure fails the run
         # here, minutes into the build.

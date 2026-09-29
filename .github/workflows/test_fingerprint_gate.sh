@@ -35,12 +35,15 @@ case "$STAGE" in
   gecko_gv)
     pushd "$mozilla_release"
     read -ra locales < "$root/locales"
-    MOZ_CHROME_MULTILOCALE="${locales[*]}" gradle :geckoview:testReleaseUnitTest
+    # AGP 9 (onlyEnableUnitTestForTheTestedBuildType=true by default) creates
+    # only the test task for the tested build type (testBuildType=debug by
+    # default) — testReleaseUnitTest no longer exists in AGP 9 projects.
+    MOZ_CHROME_MULTILOCALE="${locales[*]}" gradle :geckoview:testDebugUnitTest
     popd
     ;;
   fenix)
     pushd "$fenix"
-    gradle :app:testReleaseUnitTest
+    gradle :app:testDebugUnitTest
     popd
     ;;
   *)
