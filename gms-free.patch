@@ -293,3 +293,351 @@ index 1fedd8167f..d38e39b984 100644
          } catch (e: IllegalStateException) {
              // This is unlikely to happen, as this should be running off the main thread.
              Logger.debug("getAdvertisingID() - AdvertisingIdClient must be called off the main thread")
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
+index b10c6af6c1..458e273223 100644
+--- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
+@@ -5,26 +5,14 @@
+ package org.mozilla.fenix.components
+ 
+ import android.app.Activity
+-import android.content.Context
+ import androidx.activity.ComponentActivity
+ import androidx.lifecycle.Lifecycle
+-import androidx.lifecycle.lifecycleScope
+ import androidx.test.core.app.launchActivity
+-import com.google.android.gms.tasks.OnCompleteListener
+-import com.google.android.gms.tasks.OnFailureListener
+-import com.google.android.gms.tasks.OnSuccessListener
+-import com.google.android.gms.tasks.Task
+-import com.google.android.play.core.review.ReviewInfo
+-import com.google.android.play.core.review.ReviewManager
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.test.runTest
+-import mozilla.components.support.test.assertUnused
+-import mozilla.components.support.test.ext.joinBlocking
+ import mozilla.components.support.test.robolectric.testContext
+ import org.junit.Assert.assertEquals
+-import org.junit.Assert.assertFalse
+ import org.junit.Assert.assertNull
+-import org.junit.Assert.assertTrue
+ import org.junit.Rule
+ import org.junit.Test
+ import org.junit.runner.RunWith
+@@ -35,94 +23,76 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
+ import org.mozilla.fenix.components.ReviewPromptAttemptResult.Unknown
+ import org.mozilla.fenix.helpers.FenixGleanTestRule
+ import org.robolectric.RobolectricTestRunner
++import kotlin.test.assertIs
+ import java.text.SimpleDateFormat
+ import java.util.Date
+ import java.util.Locale
+-import java.util.concurrent.Executor
+-import kotlin.test.assertIs
+ 
++/**
++ * Tests for the (GMS-free) [PlayStoreReviewPromptController].
++ *
++ * The controller wraps the Play Store In-App Review API; in a build without
++ * GMS the prompt can never be displayed, so the production code reduces to
++ * fixed results ([Unknown] / no-op). What still has real behavior — and is
++ * therefore tested here — is the result *classification* from a ReviewInfo's
++ * string form ([ReviewPromptAttemptResult.from]) and the Glean event
++ * recording ([recordReviewPromptEvent]), which is how we'd know the flow was
++ * even attempted if the API were ever restored.
++ */
+ @RunWith(RobolectricTestRunner::class)
+ class PlayStoreReviewPromptControllerTest {
+ 
+     @get:Rule
+     val gleanTestRule = FenixGleanTestRule(testContext)
+ 
++    // ---- the GMS-free behavior of the stubbed controller ----
++
+     @Test
+-    fun `GIVEN activity is resumed WHEN tryPromptReview is called THEN launches review flow`() =
++    fun `GIVEN a GMS-free build WHEN tryPromptReview is called THEN the attempt is Unknown`() =
+         runTest {
+-            val reviewManager = SuccessfulReviewManager(testContext)
+             val controller = PlayStoreReviewPromptController(
+-                manager = reviewManager,
+                 numberOfAppLaunches = { 5 },
+             )
+             launchActivity<ComponentActivity>().use { scenario ->
+                 scenario.moveToState(Lifecycle.State.RESUMED)
+                 scenario.onActivity { activity ->
+                     activity.lifecycleScope.launch {
+-                        controller.tryPromptReview(activity)
+-
+-                        assertTrue(reviewManager.promptHasBeenRequested)
++                        val result = controller.tryPromptReview(activity)
++                        assertIs<Unknown>(result)
+                     }
+                 }
+             }
+         }
+ 
+     @Test
+-    fun `GIVEN activity is destroyed WHEN tryPromptReview is called THEN doesn't launch review flow`() = runTest {
+-        val reviewManager = SuccessfulReviewManager(testContext)
++    fun `GIVEN a GMS-free build WHEN tryLaunchPlayStoreReview is called THEN nothing throws`() {
+         val controller = PlayStoreReviewPromptController(
+-            manager = reviewManager,
+             numberOfAppLaunches = { 5 },
+         )
+         launchActivity<ComponentActivity>().use { scenario ->
+-            scenario.moveToState(Lifecycle.State.RESUMED)
+             scenario.onActivity { activity ->
+-                activity.lifecycleScope
+-                    .launch {
+-                        scenario.moveToState(Lifecycle.State.DESTROYED)
+-                        controller.tryPromptReview(activity)
+-                    }
+-                    .joinBlocking()
++                controller.tryLaunchPlayStoreReview(activity) { /* openInNewTab */ }
+             }
+         }
+-        assertFalse(reviewManager.promptHasBeenRequested)
+     }
+ 
+-    @Test
+-    fun `WHEN the reviews API fails THEN returns Error result`() = runTest {
+-        val controller = PlayStoreReviewPromptController(
+-            manager = FailingReviewManager(),
+-            numberOfAppLaunches = { 5 },
+-        )
+-        launchActivity<ComponentActivity>().use { scenario ->
+-            scenario.onActivity { activity ->
+-                activity.lifecycleScope.launch {
+-                    val result = controller.tryPromptReview(activity)
+-
+-                    assertIs<Error>(result)
+-                }
+-            }
+-        }
+-    }
++    // ---- ReviewPromptAttemptResult.from: classifying the ReviewInfo string ----
+ 
+     @Test
+-    fun `WHEN review info contains 'isNoOp=false' THEN prompt was displayed`() {
++    fun `WHEN review info contains isNoOp=false THEN prompt was displayed`() {
+         val displayState = ReviewPromptAttemptResult.from(createReviewInfoString("isNoOp=false"))
+-
+         assertEquals(Displayed, displayState)
+     }
+ 
+     @Test
+-    fun `WHEN review info contains 'isNoOp=true' THEN prompt wasn't displayed`() {
++    fun `WHEN review info contains isNoOp=true THEN prompt wasn't displayed`() {
+         val displayState = ReviewPromptAttemptResult.from(createReviewInfoString("isNoOp=true"))
+-
+         assertEquals(NotDisplayed, displayState)
+     }
+ 
+     @Test
+-    fun `WHEN review info doesn't contain 'isNoOp' THEN prompt display state is unknown`() {
++    fun `WHEN review info doesn't contain isNoOp THEN prompt display state is unknown`() {
+         val displayState = ReviewPromptAttemptResult.from(createReviewInfoString())
+-
+         assertEquals(Unknown, displayState)
+     }
+ 
+@@ -130,6 +100,8 @@ class PlayStoreReviewPromptControllerTest {
+         return "ReviewInfo{pendingIntent=PendingIntent{5b613b1: android.os.BinderProxy@46c8096}, $optionalArg}"
+     }
+ 
++    // ---- recordReviewPromptEvent: the Glean event ----
++
+     @Test
+     fun reviewPromptWasDisplayed() {
+         testRecordReviewPromptEventRecordsTheExpectedData(Displayed, "true")
+@@ -177,66 +149,3 @@ class PlayStoreReviewPromptControllerTest {
+         }
+     }
+ }
+-
+-private class SuccessfulReviewManager(context: Context) : ReviewManager {
+-    var promptHasBeenRequested = false
+-
+-    private val wrapped = com.google.android.play.core.review.testing.FakeReviewManager(context)
+-
+-    override fun requestReviewFlow(): Task<ReviewInfo> {
+-        val requestReviewFlow = wrapped.requestReviewFlow()
+-        return SuccessfulTask(requestReviewFlow.result)
+-    }
+-
+-    override fun launchReviewFlow(activity: Activity, reviewInfo: ReviewInfo): Task<Void?> {
+-        promptHasBeenRequested = true
+-        return VoidTask()
+-    }
+-}
+-
+-private class FailingReviewManager : ReviewManager {
+-    override fun requestReviewFlow() = FailedTask<ReviewInfo>()
+-    override fun launchReviewFlow(activity: Activity, reviewInfo: ReviewInfo) = assertUnused()
+-}
+-
+-private class SuccessfulTask<T>(private val result: T) : CompleteTask<T>() {
+-    override fun isSuccessful() = true
+-    override fun getResult() = result
+-    override fun <X : Throwable?> getResult(exceptionType: Class<X>) = result
+-    override fun getException() = null
+-}
+-
+-private class FailedTask<T> : CompleteTask<T>() {
+-    override fun isSuccessful() = false
+-    override fun getException() = RuntimeException("Unexpected exception.")
+-}
+-
+-private open class CompleteTask<T> : FakeGmsTask<T>() {
+-    override fun isComplete() = true
+-    override fun isCanceled() = false
+-
+-    override fun addOnCompleteListener(activity: Activity, listener: OnCompleteListener<T>): Task<T> {
+-        val isNotStopped = (activity as ComponentActivity).lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+-        if (isNotStopped) {
+-            listener.onComplete(this)
+-        }
+-        return this
+-    }
+-}
+-
+-private class VoidTask : FakeGmsTask<Void?>()
+-
+-private open class FakeGmsTask<T> : Task<T>() {
+-    override fun isSuccessful(): Boolean = assertUnused()
+-    override fun isComplete(): Boolean = assertUnused()
+-    override fun isCanceled(): Boolean = assertUnused()
+-    override fun getResult(): T? = assertUnused()
+-    override fun <X : Throwable?> getResult(exceptionType: Class<X>): T? = assertUnused()
+-    override fun getException(): Exception? = assertUnused()
+-    override fun addOnSuccessListener(listener: OnSuccessListener<in T>): Task<T> = assertUnused()
+-    override fun addOnSuccessListener(executor: Executor, listener: OnSuccessListener<in T>): Task<T> = assertUnused()
+-    override fun addOnSuccessListener(activity: Activity, listener: OnSuccessListener<in T>): Task<T> = assertUnused()
+-    override fun addOnFailureListener(listener: OnFailureListener): Task<T> = assertUnused()
+-    override fun addOnFailureListener(executor: Executor, listener: OnFailureListener): Task<T> = assertUnused()
+-    override fun addOnFailureListener(activity: Activity, listener: OnFailureListener): Task<T> = assertUnused()
+-}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
+index 0c8833803f..97f0c3b6dc 100644
+--- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
+@@ -4,11 +4,6 @@
+ 
+ package org.mozilla.fenix.components.metrics
+ 
+-import com.google.android.gms.ads.identifier.AdvertisingIdClient
+-import com.google.android.gms.common.GooglePlayServicesNotAvailableException
+-import com.google.android.gms.common.GooglePlayServicesRepairableException
+-import io.mockk.every
+-import io.mockk.mockk
+ import kotlinx.coroutines.test.runTest
+ import org.junit.Assert.assertArrayEquals
+ import org.junit.Assert.assertEquals
+@@ -19,12 +14,14 @@ import java.io.IOException
+ class MetricsUtilsTest {
+ 
+     @Test
+-    fun `getAdvertisingID() returns null if the API throws`() {
++    fun `getAdvertisingID() returns null if the retrieve callback throws`() {
++        // No GMS in this build: the callback is always { null } in
++        // production (see ActivationPing), but the null-on-exception contract
++        // is what makes a future backend swap safe, so it stays tested.
+         val exceptions = listOf(
+-            GooglePlayServicesNotAvailableException(1),
+-            GooglePlayServicesRepairableException(0, "", mockk()),
+             IllegalStateException(),
+             IOException(),
++            NullPointerException(),
+         )
+ 
+         exceptions.forEach {
+@@ -33,20 +30,14 @@ class MetricsUtilsTest {
+     }
+ 
+     @Test
+-    fun `getAdvertisingID() returns null if the API returns null info`() {
+-        val mockInfo: AdvertisingIdClient.Info = mockk()
+-        every { mockInfo.id } returns null
+-
+-        assertNull(MetricsUtils.getAdvertisingID { mockInfo.id })
++    fun `getAdvertisingID() returns null if there is no advertising ID`() {
++        assertNull(MetricsUtils.getAdvertisingID { null })
+     }
+ 
+     @Test
+-    fun `getAdvertisingID() returns a valid string if the API returns a valid ID`() {
++    fun `getAdvertisingID() returns the ID when the callback provides one`() {
+         val testId = "test-value-id"
+-        val mockInfo: AdvertisingIdClient.Info = mockk()
+-        every { mockInfo.id } returns testId
+-
+-        assertEquals(testId, MetricsUtils.getAdvertisingID({ mockInfo.id }))
++        assertEquals(testId, MetricsUtils.getAdvertisingID { testId })
+     }
+ 
+     @Test
+@@ -79,6 +70,39 @@ class MetricsUtilsTest {
+         assertArrayEquals(expectedDigestBytes, shaDigest)
+     }
+ 
++    @Test
++    fun `getHashedIdentifier() returns null when there is no advertising ID`() = runTest {
++        assertNull(
++            MetricsUtils.getHashedIdentifier(
++                retrieveAdvertisingIdInfo = { null },
++                encodeToString = { bytes, _ -> String(bytes) },
++            ),
++        )
++    }
++
++    @Test
++    fun `getHashedIdentifier() uses the default salt when no custom salt is given`() = runTest {
++        val testId = "test-value-id"
++        var digest: ByteArray? = null
++
++        // Without a custom salt the default salt is used (the function is
++        // stable across calls — a changed salt would change the digest).
++        val first = MetricsUtils.getHashedIdentifier(
++            retrieveAdvertisingIdInfo = { testId },
++            encodeToString = { bytes, _ -> digest = bytes; "x" },
++        )
++        assertEquals("x", first)
++
++        val second = MetricsUtils.getHashedIdentifier(
++            retrieveAdvertisingIdInfo = { testId },
++            encodeToString = { bytes, _ ->
++                assertArrayEquals(digest, bytes)
++                "x"
++            },
++        )
++        assertEquals("x", second)
++    }
++
+     companion object {
+         const val ENGINE_SOURCE_IDENTIFIER = "google-2018"
+     }
+diff --git a/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt b/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
+index 7a767208f8..112aa055e7 100644
+--- a/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
++++ b/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
+@@ -551,7 +551,18 @@ class ProjectPlugin : Plugin<Project> {
+                 systemProperty("logging.test-mode", "true")
+                 systemProperty("javax.net.ssl.trustStoreType", "JKS")
+ 
+-                testLogging.events = emptySet()
++                // CI-visible test output (was emptySet(): a failing test
++                // printed only its name, no message, no stack, wrong line).
++                // Property style — this is a Kotlin source file configuring a
++                // Groovy DSL object (no trailing-lambda method calls here).
++                testLogging.events = setOf(
++                    org.gradle.api.tasks.testing.logging.TestLogEvent.FAILED,
++                    org.gradle.api.tasks.testing.logging.TestLogEvent.PASSED,
++                    org.gradle.api.tasks.testing.logging.TestLogEvent.SKIPPED,
++                )
++                testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
++                testLogging.showStackTraces = true
++                testLogging.showCauses = true
+ 
+                 val listener = MozillaTestOutputListener(logger)
+                 addTestListener(listener)

@@ -307,6 +307,11 @@ apply_patch "$patches/gecko-release-artifacts.patch"
 # Remove unneeded GeckoView Gradle tasks
 apply_patch "$patches/gecko-remove-irrelevant-gradle-tasks.patch"
 
+# Fail in ~2s if a GMS/microG import reappeared in the mobile android
+# sources (the failure class that cost runs #1-#7 2.5h each to surface at
+# a gradle compile stage). Checks the fully patched tree.
+bash "$patches/check_gms_residue.sh" "$mozilla_release"
+
 # Hack the timeout for
 # geckoview:generateJNIWrappersForGeneratedWithGeckoBinariesDebug
 sed -i \

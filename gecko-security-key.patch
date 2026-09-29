@@ -2810,3 +2810,246 @@ new file mode 100644
 +    }
 +  }
 +}
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
+new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
+@@ -0,0 +1,238 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++package org.mozilla.gecko.ctap2;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNotNull;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.fail;
++
++import com.upokecenter.cbor.CBOREncodeOptions;
++import com.upokecenter.cbor.CBORObject;
++import java.util.Arrays;
++import java.util.Collections;
++import org.junit.Test;
++
++/**
++ * Wire-format tests for {@link Ctap2Cbor} against the CTAP2/WebAuthn spec
++ * shapes the browser depends on: request field presence and key types, the
++ * text-vs-integer key asymmetry, canonical (re)encoding stability, negative
++ * algorithm integers, and all response decode paths. Pure JVM — no Android.
++ */
++public class Ctap2CborTest {
++  private static final byte[] CHALLENGE =
++      new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
++  private static final byte[] CRED_ID = new byte[] {9, 8, 7, 6, 5};
++  private static final byte[] USER_ID = new byte[] {10, 20};
++
++  private static final CBOREncodeOptions CTAP2 = CBOREncodeOptions.DefaultCtap2Canonical;
++
++  private static byte[] enc(CBORObject o) {
++    return o.EncodeToBytes(CTAP2);
++  }
++
++  // ---------------- getAssertion ----------------
++
++  @Test
++  public void getAssertion_requestCarriesRequiredFields() {
++    final byte[] bytes =
++        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE,
++            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)), null, false);
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    assertEquals("example.com", map.get(1).AsString());
++    assertArrayEquals(CHALLENGE, map.get(2).GetByteString());
++    // allowList entry: TEXT keys, per WebAuthn PublicKeyCredentialDescriptor.
++    assertEquals("public-key", map.get(3).get(0).get("type").AsString());
++    assertArrayEquals(CRED_ID, map.get(3).get(0).get("id").GetByteString());
++    assertNull("no appid extension when appId is null", map.get(4));
++    // options: up always true; uv only when required.
++    assertEquals(Boolean.TRUE, map.get(5).get("up").AsBoolean());
++    assertNull("uv omitted when not required", map.get(5).get("uv"));
++  }
++
++  @Test
++  public void getAssertion_optionalFieldsAppearOnlyWhenRequested() {
++    final byte[] uv =
++        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE, null, "app.example.org", true);
++    final CBORObject map = CBORObject.DecodeFromBytes(uv);
++    assertNull("allowList omitted when empty", map.get(3));
++    assertEquals("app.example.org", map.get(4).get("appid").AsString());
++    assertEquals(Boolean.TRUE, map.get(5).get("uv").AsBoolean());
++
++    final byte[] noAllow =
++        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE, null, null, false);
++    final CBORObject plain = CBORObject.DecodeFromBytes(noAllow);
++    assertEquals(3, plain.size()); // only 1, 2, 5
++  }
++
++  @Test
++  public void getAssertion_encodeIsCanonicalAndStable() {
++    final byte[] bytes =
++        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE,
++            Arrays.asList(new Ctap2Cbor.CredentialId(CRED_ID),
++                          new Ctap2Cbor.CredentialId(new byte[] {1, 1})),
++            null, true);
++    // Re-encoding the decoded map must be byte-identical (canonical key order
++    // + minimal integer forms): an authenticator that canonicalizes before
++    // comparing signatures over this bytes must agree with us.
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    assertArrayEquals(bytes, map.EncodeToBytes(CTAP2));
++  }
++
++  @Test
++  public void getAssertion_decodeResponse_fullShape() {
++    final byte[] authData = new byte[] {(byte) 0xAA, (byte) 0xBB};
++    final byte[] signature = new byte[] {(byte) 0xC0, (byte) 0xFF};
++    final CBORObject resp = CBORObject.NewMap()
++        .Add(CBORObject.FromObject(1), CBORObject.NewMap()
++            .Add(CBORObject.FromObject("type"), CBORObject.FromObject("public-key"))
++            .Add(CBORObject.FromObject("id"), CBORObject.FromObject(CRED_ID)))
++        .Add(CBORObject.FromObject(2), CBORObject.FromObject(authData))
++        .Add(CBORObject.FromObject(3), CBORObject.FromObject(signature))
++        .Add(CBORObject.FromObject(4), CBORObject.NewMap()
++            .Add(CBORObject.FromObject("id"), CBORObject.FromObject(USER_ID)));
++    final Ctap2Cbor.GetAssertionResponse r =
++        Ctap2Cbor.decodeGetAssertion(enc(resp), null);
++    assertArrayEquals(CRED_ID, r.credentialId);
++    assertArrayEquals(authData, r.authenticatorData);
++    assertArrayEquals(signature, r.signature);
++    assertArrayEquals(USER_ID, r.userHandle);
++  }
++
++  @Test
++  public void getAssertion_decodeResponse_arrayCredentialAndNoUser() {
++    // Some authenticators emit key 1 as an ARRAY of descriptors.
++    final CBORObject resp = CBORObject.NewMap()
++        .Add(CBORObject.FromObject(1), CBORObject.NewArray()
++            .Add(CBORObject.NewMap().Add(CBORObject.FromObject("id"),
++                CBORObject.FromObject(CRED_ID))))
++        .Add(CBORObject.FromObject(2), CBORObject.FromObject(new byte[] {1}))
++        .Add(CBORObject.FromObject(3), CBORObject.FromObject(new byte[] {2}));
++    final Ctap2Cbor.GetAssertionResponse r =
++        Ctap2Cbor.decodeGetAssertion(enc(resp), null);
++    assertArrayEquals(CRED_ID, r.credentialId);
++    assertNull("user handle null when key 4 absent", r.userHandle);
++  }
++
++  @Test
++  public void getAssertion_decodeResponse_credentialRecoveredFromAllowList() {
++    // Device-resident credential: key 1 absent, exactly one credential allowed.
++    final CBORObject resp = CBORObject.NewMap()
++        .Add(CBORObject.FromObject(2), CBORObject.FromObject(new byte[] {1}))
++        .Add(CBORObject.FromObject(3), CBORObject.FromObject(new byte[] {2}));
++    final Ctap2Cbor.GetAssertionResponse r =
++        Ctap2Cbor.decodeGetAssertion(enc(resp),
++            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)));
++    assertArrayEquals(CRED_ID, r.credentialId);
++  }
++
++  @Test
++  public void getAssertion_decodeResponse_missingCredentialThrows() {
++    final CBORObject resp = CBORObject.NewMap()
++        .Add(CBORObject.FromObject(2), CBORObject.FromObject(new byte[] {1}))
++        .Add(CBORObject.FromObject(3), CBORObject.FromObject(new byte[] {2}));
++    try {
++      Ctap2Cbor.decodeGetAssertion(enc(resp), Arrays.asList(
++          new Ctap2Cbor.CredentialId(CRED_ID), new Ctap2Cbor.CredentialId(new byte[] {1})));
++      fail("expected IllegalStateException");
++    } catch (final IllegalStateException e) {
++      // expected: no key 1 and more than one allowed credential
++    }
++  }
++
++  // ---------------- makeCredential ----------------
++
++  @Test
++  public void makeCredential_requestCarriesWebAuthnShapes() {
++    final byte[] bytes =
++        Ctap2Cbor.encodeMakeCredential(CHALLENGE, "example.com", "Example", USER_ID,
++            "user", "User",
++            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)), // ES256
++            null, false, true);
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    assertArrayEquals(CHALLENGE, map.get(1).GetByteString());
++    // rp / user: WebAuthn TEXT keys (id is bytes, names are text).
++    assertEquals("example.com", map.get(2).get("id").AsString());
++    assertEquals("Example", map.get(2).get("name").AsString());
++    assertArrayEquals(USER_ID, map.get(3).get("id").GetByteString());
++    assertEquals("user", map.get(3).get("name").AsString());
++    assertEquals("User", map.get(3).get("displayName").AsString());
++    // pubKeyCredParams: TEXT keys, alg as a negative integer (ES256 = -7).
++    assertEquals("public-key", map.get(4).get(0).get("type").AsString());
++    assertEquals(-7, map.get(4).get(0).get("alg").AsInt32());
++    assertNull("excludeList omitted when empty", map.get(5));
++    // options at CTAP2 key 7: up always, uv only when required, rk absent.
++    assertEquals(Boolean.TRUE, map.get(7).get("up").AsBoolean());
++    assertEquals(Boolean.TRUE, map.get(7).get("uv").AsBoolean());
++    assertNull("rk omitted for non-resident", map.get(7).get("rk"));
++  }
++
++  @Test
++  public void makeCredential_excludeListAndResidentKeyOptions() {
++    final byte[] bytes =
++        Ctap2Cbor.encodeMakeCredential(CHALLENGE, "example.com", null, USER_ID, null, null,
++            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-257)), // RS256
++            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)), true, false);
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    assertNull("rp.name omitted when null", map.get(2).get("name"));
++    assertNull("user.name omitted when null", map.get(3).get("name"));
++    // excludeList entry: TEXT keys, same shape as allowList.
++    assertEquals("public-key", map.get(5).get(0).get("type").AsString());
++    assertArrayEquals(CRED_ID, map.get(5).get(0).get("id").GetByteString());
++    assertEquals(-257, map.get(4).get(0).get("alg").AsInt32());
++    assertEquals(Boolean.TRUE, map.get(7).get("rk").AsBoolean());
++    assertNull("uv omitted when not required", map.get(7).get("uv"));
++  }
++
++  @Test
++  public void makeCredential_negativeAlgUsesCBORNegativeIntMajorType() {
++    // The classic sign bug: -7 must encode as major type 1 (0x26), not as a
++    // positive integer. If this regresses, authenticators reject the request.
++    final byte[] bytes =
++        Ctap2Cbor.encodeMakeCredential(CHALLENGE, "example.com", "Example", USER_ID,
++            "user", "User",
++            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)), null, false, false);
++    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    final byte algByte =
++        map.get(4).get(0).get("alg").EncodeToBytes()[0];
++    assertEquals("ES256 alg must be major type 1 (negative int)", 0x26, algByte);
++  }
++
++  @Test
++  public void makeCredential_decodeResponse_yieldsWebAuthnAttestationObject() {
++    final byte[] authData = new byte[] {0x01, 0x02, 0x03, 0x04};
++    final CBORObject attStmt = CBORObject.NewMap()
++        .Add(CBORObject.FromObject("x5c"), CBORObject.FromObject(new byte[] {9, 9}));
++    final CBORObject resp = CBORObject.NewMap()
++        .Add(CBORObject.FromObject(1), CBORObject.FromObject("none"))
++        .Add(CBORObject.FromObject(2), CBORObject.FromObject(authData))
++        .Add(CBORObject.FromObject(3), attStmt);
++    final Ctap2Cbor.MakeCredentialResponse r =
++        Ctap2Cbor.decodeMakeCredential(enc(resp));
++    assertEquals("none", r.fmt);
++    assertArrayEquals(authData, r.authData);
++    // The attestation object is a TEXT-keyed CBOR map for Gecko/auth-rs.
++    final CBORObject attObj = CBORObject.DecodeFromBytes(r.attestationObject);
++    assertArrayEquals(authData, attObj.get("authData").GetByteString());
++    assertEquals("none", attObj.get("fmt").AsString());
++    assertArrayEquals(new byte[] {9, 9}, attObj.get("attStmt").get("x5c").GetByteString());
++  }
++
++  @Test
++  public void makeCredential_decodeResponse_missingFieldThrows() {
++    final CBORObject resp = CBORObject.NewMap()
++        .Add(CBORObject.FromObject(1), CBORObject.FromObject("none"))
++        .Add(CBORObject.FromObject(2), CBORObject.FromObject(new byte[] {1}));
++    // no attStmt
++    try {
++      Ctap2Cbor.decodeMakeCredential(enc(resp));
++      fail("expected IllegalStateException");
++    } catch (final IllegalStateException e) {
++      // expected
++    }
++  }
++}
