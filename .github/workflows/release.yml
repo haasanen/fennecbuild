@@ -6,9 +6,7 @@ name: Release
 #
 # Free & unlimited on this public repo (standard ubuntu-latest runners).
 # Build output goes straight to the console (STDOUT/STDERR) — no log files.
-# The console IS the record; a background heartbeat pushes only disk/memory
-# state to the `ci-logs` branch so a runner reclaimed mid-build leaves
-# something to read.
+# The console IS the record.
 
 on:
   # Every push to master starts a full build. (The repo PAT can push but 403s on
@@ -38,10 +36,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    # ci_heartbeat.sh pushes a small disk/memory state file to the `ci-logs`
-    # branch using the job's GITHUB_TOKEN. Without this the token is read-only
-    # by default and every push is a silent 403. It writes no files to the
-    # workspace; the build's own output goes to the console only.
+    # The release-publish step pushes a git tag + release (needs write access
+    # via GITHUB_TOKEN).
     permissions:
       contents: write
     # One build at a time: parallel runs save to the same cache keys and clobber
@@ -74,17 +70,6 @@ jobs:
           echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
           java -version
 
-      - name: Restore tools caches (gradle dists, rust, cargo)
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /opt/gradle-versions
-            ~/.cargo
-            ~/.rustup
-          # static keys: every input is pinned to an exact commit/version, so
-          # the caches stay valid until a pin changes (bump the key suffix then)
-          key: fennec-tools-v1
-
       - name: Gradle (version-aware shim, mirrors F-Droid's per-project wrapper)
         run: |
           # F-Droid does not pin one Gradle globally: each project's build runs on
@@ -101,13 +86,6 @@ jobs:
         run: |
           rustup default 1.95.0
           rustc --version
-
-      - name: Cache Android SDK
-        id: sdk-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /usr/lib/android-sdk
-          key: fennec-sdk-r29-37.0-37.1-v1
 
       - name: Android SDK components (NDK r29, platform, build-tools)
         run: |
@@ -268,11 +246,8 @@ jobs:
 
       - name: Build LLVM toolchain (or restore from cache)
         run: |
-          bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
-          echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
           .github/workflows/build-llvm.sh
           rc=$?
-          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (after LLVM) ==="; df -h /
           exit "$rc"
 
@@ -307,11 +282,8 @@ jobs:
 
       - name: Build WASI SDK (or restore from cache)
         run: |
-          bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
-          echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
           .github/workflows/build-wasi.sh
           rc=$?
-          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (after WASI) ==="; df -h /
           exit "$rc"
 
@@ -390,11 +362,6 @@ jobs:
             fennec-p3-obj-v1
             fennec-p3-build-v1-
             fennec-p3-build-v1
-      - name: Build heartbeat
-        run: |
-          bash .github/workflows/ci_heartbeat.sh "$GITHUB_WORKSPACE" &
-          echo $! > "$GITHUB_WORKSPACE/heartbeat.pid"
-
       - name: Publish CBOR + Glean to mavenLocal
         id: p3a
         run: bash .github/workflows/run_p3_stage.sh "cbor glean glean_as" p3a
@@ -634,10 +601,9 @@ jobs:
             ~/.gradle
           key: fennec-p3-deps-v1
 
-      - name: Stop Phase 3 heartbeat
+      - name: Final disk state
         if: always()
         run: |
-          kill "$(cat "$GITHUB_WORKSPACE/heartbeat.pid")" 2>/dev/null || true
           echo "=== df (end) ==="; df -h /
 
       - name: Locate unsigned APK

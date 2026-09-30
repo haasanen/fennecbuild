@@ -294,17 +294,17 @@ index 1fedd8167f..d38e39b984 100644
              // This is unlikely to happen, as this should be running off the main thread.
              Logger.debug("getAdvertisingID() - AdvertisingIdClient must be called off the main thread")
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-index b10c6af6c1..458e273223 100644
+index b10c6af6c1..105b93180c 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-@@ -5,26 +5,14 @@
+@@ -5,26 +5,15 @@
  package org.mozilla.fenix.components
  
  import android.app.Activity
 -import android.content.Context
  import androidx.activity.ComponentActivity
  import androidx.lifecycle.Lifecycle
--import androidx.lifecycle.lifecycleScope
+ import androidx.lifecycle.lifecycleScope
  import androidx.test.core.app.launchActivity
 -import com.google.android.gms.tasks.OnCompleteListener
 -import com.google.android.gms.tasks.OnFailureListener
@@ -324,7 +324,7 @@ index b10c6af6c1..458e273223 100644
  import org.junit.Rule
  import org.junit.Test
  import org.junit.runner.RunWith
-@@ -35,94 +23,76 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
+@@ -35,94 +24,76 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
  import org.mozilla.fenix.components.ReviewPromptAttemptResult.Unknown
  import org.mozilla.fenix.helpers.FenixGleanTestRule
  import org.robolectric.RobolectricTestRunner
@@ -442,7 +442,7 @@ index b10c6af6c1..458e273223 100644
          assertEquals(Unknown, displayState)
      }
  
-@@ -130,6 +100,8 @@ class PlayStoreReviewPromptControllerTest {
+@@ -130,6 +101,8 @@ class PlayStoreReviewPromptControllerTest {
          return "ReviewInfo{pendingIntent=PendingIntent{5b613b1: android.os.BinderProxy@46c8096}, $optionalArg}"
      }
  
@@ -451,7 +451,7 @@ index b10c6af6c1..458e273223 100644
      @Test
      fun reviewPromptWasDisplayed() {
          testRecordReviewPromptEventRecordsTheExpectedData(Displayed, "true")
-@@ -177,66 +149,3 @@ class PlayStoreReviewPromptControllerTest {
+@@ -177,66 +150,3 @@ class PlayStoreReviewPromptControllerTest {
          }
      }
  }

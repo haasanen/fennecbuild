@@ -84,6 +84,17 @@ sed -i \
     -e 's/firefox_threads/fennec_threads/' \
     -e 's/firefox_features/fennec_features/' \
     app/src/main/java/org/mozilla/fenix/perf/ProfilerUtils.kt
+# The profiler unit test (added upstream after this fork) still references
+# ProfilerSettings.Firefox; apply the same rename so it compiles.
+sed -i \
+    -e 's/ProfilerSettings\.Firefox/ProfilerSettings.Fennec/g' \
+    app/src/test/java/org/mozilla/fenix/perf/ProfilerViewModelTest.kt
+# The unified-push switch moves AutoPushSubscription from
+# mozilla.components.feature.push to org.ironfoxoss.unifiedpush (same
+# constructor shape); follow it in the webpush unit test.
+sed -i \
+    -e 's/import mozilla\.components\.feature\.push\.AutoPushSubscription/import org.ironfoxoss.unifiedpush.AutoPushSubscription/' \
+    app/src/test/java/org/mozilla/fenix/push/WebPushEngineIntegrationTest.kt
 
 # Replace proprietary artwork
 sed -i -e 's|@drawable/animated_splash_screen<|@drawable/splash_screen<|' \
