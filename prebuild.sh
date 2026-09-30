@@ -301,6 +301,14 @@ apply_patch "$patches/fenix-disable-sent-from-fx.patch"
 # Add "Enable UnifiedPush" and "Use UnifiedPush" settings
 apply_patch "$patches/fenix-use-unifiedpush.patch"
 
+# Adapt the upstream fenix unit tests to the fork's behavior so the full
+# suite (gated by fingerprint in CI) passes: rename the "Firefox" display
+# strings to "Fennec" (the *strings.xml rename above changes what the tests
+# read at runtime) and update the defaults for the features this fork
+# disables (telemetry, experimentation, crash reporting, Pocket
+# recommendations). Touches test files only.
+apply_patch "$patches/fenix-adapt-unit-tests.patch"
+
 # There are a lot of "No cast needed" warnings in the generated code
 sed -i -e 's/allWarningsAsErrors, true/allWarningsAsErrors, false/' mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
 
