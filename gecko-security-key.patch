@@ -1570,7 +1570,7 @@ diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbC
 new file mode 100644
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
-@@ -0,0 +1,434 @@
+@@ -0,0 +1,570 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1589,6 +1589,7 @@ new file mode 100644
 +import java.nio.ByteBuffer;
 +import java.nio.ByteOrder;
 +import java.security.SecureRandom;
++import java.util.List;
 +
 +/**
 + * CTAP2 over USB HID transport ("CTAPHID"), per the FIDO Alliance CTAP v2.0 spec, section 8.1.
@@ -1628,8 +1629,11 @@ new file mode 100644
 +  private static final int CAPABILITY_CBOR = 0x04;
 +
 +  private static final int USB_CLASS_HID = 0x03;
-+  // YubiKey interface layout: 0 = keyboard (HID boot), 1 = CTAP HID.
-+  private static final int HID_INTERFACE_ID = 1;
++  // CTAP HID devices declare bInterfaceProtocol 0x21 on their CTAP interface (CTAP 2.0 spec
++  // section 8.1.2.1 / USB HID usage table). This is the only layout-independent marker the
++  // spec provides; the interface POSITION differs between vendors and even YubiKey models
++  // (e.g. 0 = keyboard, 1 = CCID smart-card, 2 = CTAP), so it must never be hardcoded.
++  private static final int CTAP_HID_PROTOCOL = 0x21;
 +
 +  private static final int REPORT_SIZE_DEFAULT = 64;
 +  private static final int MIN_REPORT_SIZE = 8;
@@ -1640,39 +1644,161 @@ new file mode 100644
 +
 +  private static final long WAIT_TIMEOUT_MS = 1000L;
 +  private static final long PACKET_TIMEOUT_MS = 30_000L;
++  // Short timeout used while probing interfaces with CTAPHID_INIT: only a live CTAP applet
++  // answers, everything else is silent, so a wrong interface is rejected in ~2 s instead of 30.
++  private static final long PROBE_TIMEOUT_MS = 2_000L;
++  // Probe budget: max IN waits per interface during probing (bounds keep-alive-only loops).
++  private static final int PROBE_WAIT_BUDGET = 8;
 +
 +  private UsbDeviceConnection mConnection;
 +  private UsbRequest mInRequest;
 +  private UsbRequest mOutRequest;
 +  private int mChannel = -1;
 +  private int mReportSize = REPORT_SIZE_DEFAULT;
++  private long mInTimeoutMs = PACKET_TIMEOUT_MS;
++  private int mProbeWaitsRemaining = -1; // -1 = no budget (normal operation)
 +  private final ByteBuffer mInBuffer = ByteBuffer.allocateDirect(REPORT_SIZE_DEFAULT);
 +  private final ByteBuffer mOutBuffer = ByteBuffer.allocateDirect(REPORT_SIZE_DEFAULT);
 +
 +  /**
-+   * Binds the CTAPHID interface of {@code device}. Returns false when the device has no HID
-+   * interface with both an IN and an OUT endpoint (the CTAPHID pair, spec 8.1.8.1) or the
-+   * interface cannot be claimed.
++   * Binds the CTAPHID interface of {@code device}. The CTAP interface is located by PROBE, not by
++   * position: every HID interface with an IN+OUT endpoint pair (spec 8.1.8.1) is tried in rank
++   * order (see {@link #rankInterfaces}) and given a short CTAPHID_INIT probe; the first interface
++   * that answers is the FIDO one. Interface layouts differ between vendors and models, so a
++   * hardcoded position is unreliable. Returns false when nothing answers.
 +   */
 +  public boolean bindDevice(final UsbDevice device, final UsbManager usb) {
-+    UsbInterface intf = null;
-+    for (int i = 0; i < device.getInterfaceCount(); i++) {
-+      if (device.getInterface(i).getId() == HID_INTERFACE_ID) {
-+        intf = device.getInterface(i);
-+        break;
++    final int[] ranked = rankInterfaces(device);
++    for (final int idx : ranked) {
++      final UsbInterface intf = device.getInterface(idx);
++      if (bindInterface(device, usb, intf)) {
++        mInTimeoutMs = PROBE_TIMEOUT_MS;
++        mProbeWaitsRemaining = PROBE_WAIT_BUDGET;
++        final boolean ok = initialize();
++        mProbeWaitsRemaining = -1;
++        mInTimeoutMs = PACKET_TIMEOUT_MS;
++        if (ok) {
++          Log.i(TAG, "CTAP interface bound (index " + intf.getId() + ", protocol 0x"
++              + Integer.toHexString(intf.getInterfaceProtocol()) + ")");
++          return true;
++        }
++        release();
 +      }
 +    }
-+    if (intf == null) {
-+      for (int i = 0; i < device.getInterfaceCount(); i++) {
-+        if (device.getInterface(i).getInterfaceClass() == USB_CLASS_HID) {
-+          intf = device.getInterface(i);
-+          break;
++    Log.w(TAG, "no CTAP interface answered CTAPHID_INIT on this device");
++    return false;
++  }
++
++  /**
++   * Minimal HID interface descriptor used for candidate ranking. Pure JVM (no Android classes) so
++   * the ranking — the exact logic that failed with a hardcoded interface ID — is unit-testable.
++   */
++  public interface HidInterfaceInfo {
++    int interfaceClass();
++
++    int interfaceProtocol();
++
++    boolean hasInEndpoint();
++
++    boolean hasOutEndpoint();
++
++    int inReportSize();
++  }
++
++  /**
++   * Pure, unit-testable candidate ordering for {@link #bindDevice}: a candidate must be
++   * HID-class with both an IN and an OUT endpoint (the CTAPHID pair, spec 8.1.8.1). Primary key:
++   * CTAP HID protocol 0x21 (the spec's layout-independent marker) first. Secondary key:
++   * full-speed report size 64 (spec 8.1.4 default). Ties keep descriptor order.
++   */
++  public static int[] rankCandidates(final List<? extends HidInterfaceInfo> candidates) {
++    final List<Integer> cands = new java.util.ArrayList<>();
++    for (int i = 0; i < candidates.size(); i++) {
++      final HidInterfaceInfo c = candidates.get(i);
++      if (c.interfaceClass() == USB_CLASS_HID && c.hasInEndpoint() && c.hasOutEndpoint()) {
++        cands.add(i);
++      }
++    }
++    cands.sort(
++        (a, b) -> {
++          final HidInterfaceInfo ia = candidates.get(a);
++          final HidInterfaceInfo ib = candidates.get(b);
++          final int pa = ia.interfaceProtocol() == CTAP_HID_PROTOCOL ? 0 : 1;
++          final int pb = ib.interfaceProtocol() == CTAP_HID_PROTOCOL ? 0 : 1;
++          if (pa != pb) {
++            return pa - pb;
++          }
++          final int qa = ia.inReportSize() == REPORT_SIZE_DEFAULT ? 0 : 1;
++          final int qb = ib.inReportSize() == REPORT_SIZE_DEFAULT ? 0 : 1;
++          if (qa != qb) {
++            return qa - qb;
++          }
++          return a - b;
++        });
++    final int[] out = new int[cands.size()];
++    for (int i = 0; i < cands.size(); i++) {
++      out[i] = cands.get(i);
++    }
++    return out;
++  }
++
++  /** {@link #rankCandidates} applied to the descriptor of a real {@link UsbDevice}. */
++  public static int[] rankInterfaces(final UsbDevice device) {
++    final int count = device.getInterfaceCount();
++    final HidInterfaceInfo[] infos = new HidInterfaceInfo[count];
++    for (int i = 0; i < count; i++) {
++      final UsbInterface intf = device.getInterface(i);
++      boolean hasIn = false;
++      boolean hasOut = false;
++      int report = 0;
++      for (int e = 0; e < intf.getEndpointCount(); e++) {
++        final int dir = intf.getEndpoint(e).getDirection();
++        if (dir == UsbConstants.USB_DIR_IN) {
++          hasIn = true;
++          report = intf.getEndpoint(e).getMaxPacketSize();
++        } else if (dir == UsbConstants.USB_DIR_OUT) {
++          hasOut = true;
 +        }
 +      }
++      final boolean fin = hasIn;
++      final boolean fout = hasOut;
++      final int freport = report;
++      final int cls = intf.getInterfaceClass();
++      final int proto = intf.getInterfaceProtocol();
++      infos[i] =
++          new HidInterfaceInfo() {
++            @Override
++            public int interfaceClass() {
++              return cls;
++            }
++
++            @Override
++            public int interfaceProtocol() {
++              return proto;
++            }
++
++            @Override
++            public boolean hasInEndpoint() {
++              return fin;
++            }
++
++            @Override
++            public boolean hasOutEndpoint() {
++              return fout;
++            }
++
++            @Override
++            public int inReportSize() {
++              return freport;
++            }
++          };
 +    }
-+    if (intf == null) {
-+      return false;
-+    }
++    final List<HidInterfaceInfo> list = java.util.Arrays.asList(infos);
++    return rankCandidates(list);
++  }
++
++  /** Claims {@code intf} and sets up the request objects. True when the interface is ready. */
++  private boolean bindInterface(final UsbDevice device, final UsbManager usb, final UsbInterface intf) {
 +    UsbEndpoint out = null;
 +    UsbEndpoint inp = null;
 +    for (int i = 0; i < intf.getEndpointCount(); i++) {
@@ -1703,7 +1829,7 @@ new file mode 100644
 +      mOutRequest.initialize(conn, out);
 +      return true;
 +    } catch (final Exception e) {
-+      Log.e(TAG, "bindDevice failed", e);
++      Log.e(TAG, "bindInterface failed", e);
 +      release();
 +      return false;
 +    }
@@ -1738,9 +1864,12 @@ new file mode 100644
 +  /**
 +   * Allocates a CTAPHID channel via INIT on the broadcast CID. Returns true on success; the
 +   * response must echo the request nonce (guards against a stale broadcast response from another
-+   * client).
++   * client). Idempotent: a channel already allocated by {@link #bindDevice} probing is kept.
 +   */
 +  public boolean initialize() {
++    if (mChannel >= 0) {
++      return true;
++    }
 +    final byte[] nonce = new byte[NONCE_SIZE];
 +    new SecureRandom().nextBytes(nonce);
 +    final ByteBuffer packet = newOutPacket();
@@ -1922,7 +2051,7 @@ new file mode 100644
 +      return false;
 +    }
 +    while (true) {
-+      final UsbRequest got = waitRequest(WAIT_TIMEOUT_MS);
++      final UsbRequest got = waitRequest(mInTimeoutMs);
 +      if (got == null) {
 +        return false;
 +      }
@@ -1937,11 +2066,18 @@ new file mode 100644
 +
 +  /**
 +   * Queues the IN request and waits until one full report is received. Returns the buffer (rewound)
-+   * or null on timeout/failure.
++   * or null on timeout/failure. While a probe budget is active (interface probing), each wait also
++   * decrements the budget so a keep-alive-only interface cannot loop forever.
 +   */
 +  private ByteBuffer waitForIn() {
 +    if (mInRequest == null || mConnection == null) {
 +      return null;
++    }
++    if (mProbeWaitsRemaining >= 0) {
++      mProbeWaitsRemaining--;
++      if (mProbeWaitsRemaining < 0) {
++        return null;
++      }
 +    }
 +    mInBuffer.clear();
 +    mInBuffer.limit(mReportSize);
@@ -1952,7 +2088,7 @@ new file mode 100644
 +      return null;
 +    }
 +    while (true) {
-+      final UsbRequest got = waitRequest(PACKET_TIMEOUT_MS);
++      final UsbRequest got = waitRequest(mInTimeoutMs);
 +      if (got == null) {
 +        return null;
 +      }
@@ -2009,7 +2145,7 @@ diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebA
 new file mode 100644
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,800 @@
+@@ -0,0 +1,860 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -2080,6 +2216,11 @@ new file mode 100644
 +  private static final long LATE_ATTACH_POLL_INTERVAL_MS = 1_000L;
 +  private static final long LATE_ATTACH_WATCH_WINDOW_MS = 60_000L;
 +  private static final long USB_GRANT_TIMEOUT_MS = 45_000L;
++  // The single flow that owns the USB permission dialog for the key. A device re-enumeration
++  // (replug) auto-denies every pending system request at once — the resulting broadcast must
++  // not kill a flow that was not the one the user was looking at; and only the owning flow may
++  // act on the result. Guarded by LOCK.
++  private static FlowState sPermissionOwner;
 +  // Absolute watchdog for one operation (transport timeouts are shorter).
 +  private static final long FLOW_WATCHDOG_MS = 90_000L;
 +
@@ -2227,6 +2368,11 @@ new file mode 100644
 +      MAIN.removeCallbacks(grantTimeout);
 +      MAIN.removeCallbacks(watchdog);
 +      MAIN.removeCallbacks(poll);
++      synchronized (LOCK) {
++        if (sPermissionOwner == this) {
++          sPermissionOwner = null;
++        }
++      }
 +      final Context ctx = GeckoAppShell.getApplicationContext();
 +      if (permissionReceiver != null) {
 +        try {
@@ -2398,17 +2544,51 @@ new file mode 100644
 +        new BroadcastReceiver() {
 +          @Override
 +          public void onReceive(final Context c, final Intent intent) {
++            // A re-enumeration (replug) auto-denies ALL pending system requests at once, so
++            // several receivers can hear one "denied" broadcast. Only the owning flow may act
++            // on it; and a "denied" broadcast is not truth — the system's permission state for
++            // the CURRENT device is. (Our own UsbDevice handle goes stale on replug, so check
++            // the freshly-attached key, not the handle captured when the flow started.)
++            final boolean broadcastGrant =
++                intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
++            boolean owner;
++            synchronized (LOCK) {
++              owner = sPermissionOwner == flow;
++            }
++            if (!owner) {
++              Log.i(LOGTAG, "USB permission broadcast for another flow; ignoring");
++              return;
++            }
++            final UsbDevice fresh = findUsbSecurityKey();
++            final boolean granted =
++                (fresh != null && usb.hasPermission(fresh))
++                    || (device != null && usb.hasPermission(device))
++                    || (broadcastGrant && sameUsbDevice(device, getUsbDeviceExtra(intent)));
 +            unregisterPermissionReceiver(flow);
-+            if (!intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
++            if (!granted) {
 +              Log.i(LOGTAG, "USB access was not granted");
 +              flow.settleError(new WebAuthnUtils.Exception("NOT_ALLOWED_ERR"));
 +              return;
 +            }
 +            Log.i(LOGTAG, "USB access granted; starting USB flow");
-+            startUsbFlow(flow, device);
++            startUsbFlow(flow, fresh != null ? fresh : device);
 +          }
 +        };
 +    flow.permissionReceiver = receiver;
++    // A still-pending dialog from a previous flow for the same key means the user started a new
++    // attempt; the old flow can no longer complete — settle it so its result is dropped instead
++    // of lingering (and its receiver does not outlive the flow).
++    synchronized (LOCK) {
++      final FlowState prev = sPermissionOwner;
++      if (prev != null && prev != flow && !prev.settled.get()) {
++        Log.i(LOGTAG, "superseding a pending permission flow");
++        // settle after ownership transfer: cleanup() releases sPermissionOwner only for itself.
++      }
++      sPermissionOwner = flow;
++      if (prev != null && prev != flow && !prev.settled.get()) {
++        prev.settleError(new WebAuthnUtils.Exception("TIMEOUT_ERR"));
++      }
++    }
 +    // FLAG_UPDATE_CURRENT, never FLAG_NO_CREATE (see above).
 +    final int piFlags = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT;
 +    final Intent intent = new Intent(USB_PERMISSION_ACTION).setPackage(ctx.getPackageName());
@@ -2666,6 +2846,22 @@ new file mode 100644
 +    final Context ctx = GeckoAppShell.getApplicationContext();
 +    final UsbManager usb = (UsbManager) ctx.getSystemService(Context.USB_SERVICE);
 +    return usb != null && usb.hasPermission(device);
++  }
++
++  /**
++   * Same physical device? {@link UsbDevice#equals} compares the native handle, which changes on
++   * every re-enumeration — a replug must not make a granted permission look like another device.
++   */
++  private static boolean sameUsbDevice(final UsbDevice a, final UsbDevice b) {
++    if (a == b) {
++      return true;
++    }
++    if (a == null || b == null) {
++      return false;
++    }
++    return a.getVendorId() == b.getVendorId()
++        && a.getProductId() == b.getProductId()
++        && a.getDeviceName().equals(b.getDeviceName());
 +  }
 +
 +  @SuppressWarnings("deprecation")
@@ -3051,5 +3247,134 @@ new file mode 100644
 +    } catch (final IllegalStateException e) {
 +      // expected
 +    }
++  }
++}
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2RankingTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2RankingTest.java
+new file mode 100644
+--- /dev/null
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2RankingTest.java
+@@ -0,0 +1,124 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++package org.mozilla.gecko.ctap2;
++
++import static org.junit.Assert.assertArrayEquals;
++
++import java.util.Arrays;
++import org.junit.Test;
++
++/**
++ * Regression tests for {@link UsbCtap2Transport#rankCandidates}: the 2026-09-30 field failure
++ * was a hardcoded CTAP interface position (interface 1 on a YubiKey layout where 1 is the CCID
++ * smart-card interface) — the CTAP INIT was sent to the keyboard interface and timed out after
++ * 30 s. The ranking must therefore select by the layout-independent markers (HID class, IN+OUT
++ * pair, CTAP protocol 0x21, report size) and never by position. Pure JVM — no Android.
++ */
++public class UsbCtap2RankingTest {
++  private static final int CLASS_HID = 0x03;
++  private static final int CLASS_SMART_CARD = 0x0B; // CCID
++  private static final int CLASS_VENDOR = 0xFF;
++  private static final int PROTO_CTAP = 0x21;
++  private static final int PROTO_KEYBOARD = 0x01;
++
++  private static UsbCtap2Transport.HidInterfaceInfo info(
++      int cls, int proto, boolean in, boolean out, int report) {
++    return new UsbCtap2Transport.HidInterfaceInfo() {
++      @Override
++      public int interfaceClass() {
++        return cls;
++      }
++
++      @Override
++      public int interfaceProtocol() {
++        return proto;
++      }
++
++      @Override
++      public boolean hasInEndpoint() {
++        return in;
++      }
++
++      @Override
++      public boolean hasOutEndpoint() {
++        return out;
++      }
++
++      @Override
++      public int inReportSize() {
++        return report;
++      }
++    };
++  }
++
++  /** YubiKey 5-style layout: 0 = keyboard, 1 = CCID smart-card, 2 = CTAP. */
++  @Test
++  public void yubiKey5Layout_ctapFirstDespiteHighestIndex() {
++    assertArrayEquals(
++        new int[] {2, 0},
++        UsbCtap2Transport.rankCandidates(
++            Arrays.asList(
++                info(CLASS_HID, PROTO_KEYBOARD, true, true, 64),
++                info(CLASS_SMART_CARD, 0x00, true, true, 16),
++                info(CLASS_HID, PROTO_CTAP, true, true, 64))));
++  }
++
++  /** Keyboard listed before CTAP: protocol still wins over descriptor order. */
++  @Test
++  public void keyboardBeforeCtap_stillPicksCtapFirst() {
++    assertArrayEquals(
++        new int[] {0, 1},
++        UsbCtap2Transport.rankCandidates(
++            Arrays.asList(
++                info(CLASS_HID, PROTO_CTAP, true, true, 64),
++                info(CLASS_HID, PROTO_KEYBOARD, true, true, 64))));
++  }
++
++  /** An interface missing the OUT endpoint is not a CTAPHID pair (spec 8.1.8.1) — excluded. */
++  @Test
++  public void outEndpointMissing_excluded() {
++    assertArrayEquals(
++        new int[] {0},
++        UsbCtap2Transport.rankCandidates(
++            Arrays.asList(
++                info(CLASS_HID, PROTO_CTAP, true, true, 64),
++                info(CLASS_HID, PROTO_KEYBOARD, true, false, 64))));
++  }
++
++  /** Non-HID classes (CCID smart-card, vendor-defined) never qualify. */
++  @Test
++  public void nonHidClasses_excluded() {
++    assertArrayEquals(
++        new int[] {2},
++        UsbCtap2Transport.rankCandidates(
++            Arrays.asList(
++                info(CLASS_SMART_CARD, 0x00, true, true, 16),
++                info(CLASS_VENDOR, 0x00, true, true, 64),
++                info(CLASS_HID, PROTO_CTAP, true, true, 64))));
++  }
++
++  /** No CTAP-protocol marker anywhere: full-speed report 64 ranks first among the rest. */
++  @Test
++  public void noCtapProtocol_reportSizeBreaksTie() {
++    assertArrayEquals(
++        new int[] {1, 0},
++        UsbCtap2Transport.rankCandidates(
++            Arrays.asList(
++                info(CLASS_HID, PROTO_KEYBOARD, true, true, 8),
++                info(CLASS_HID, PROTO_KEYBOARD, true, true, 64))));
++  }
++
++  /** Nothing qualifies: empty, caller treats as "no interface" without NPE. */
++  @Test
++  public void nothingQualifies_emptyResult() {
++    assertArrayEquals(
++        new int[] {},
++        UsbCtap2Transport.rankCandidates(
++            Arrays.asList(
++                info(CLASS_SMART_CARD, 0x00, true, true, 16),
++                info(CLASS_HID, PROTO_KEYBOARD, false, false, 64))));
 +  }
 +}
