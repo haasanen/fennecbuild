@@ -22,7 +22,7 @@ on:
       version_code:
         description: "versionCode (scheme XYZAR; R = revision)"
         required: false
-        default: "1550023"
+        default: "1550024"
 
 env:
   ANDROID_HOME: /usr/lib/android-sdk
