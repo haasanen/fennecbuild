@@ -22,7 +22,7 @@ on:
       version_code:
         description: "versionCode (scheme XYZAR; R = revision)"
         required: false
-        default: "1550024"
+        default: "1550025"
 
 env:
   ANDROID_HOME: /usr/lib/android-sdk
@@ -181,13 +181,36 @@ jobs:
           # hand it an absolute path instead.
           echo "SRCLIB_DIR=$(cd "$SIB/srclib" && pwd)" >> "$GITHUB_ENV"
 
+      - name: Derive fork build number (versionName suffix -h<N>)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        id: fbn
+        run: |
+          # The F-Droid client shows versionNames, not versionCodes — pinning
+          # versionName to the Firefox base (155.0.0) made every update look
+          # like "155.0.0 -> 155.0.0". The versionName must carry BOTH the
+          # upstream version and our fork's build number: 155.0.0-h<N>.
+          # N is DERIVED from the versionCode, not counted from releases:
+          # the XYZAR scheme's AR digits already increment on EVERY build
+          # (one-commit bump per push), so N = versionCode % 1000 gives
+          # h1, h2, ... h999 within a Firefox major — deterministic, no API
+          # call, and it resets with a rebase exactly like the versionCode.
+          # Build-time only, same pattern as ProtonMail's -h<N> stamp.
+          VCODE=${{ inputs.version_code || '1550025' }}
+          N=$((10#$VCODE % 1000))
+          [ "$N" -eq 0 ] && N=1000
+          echo "fork build number: h${N} (versionCode ${VCODE})"
+          echo "suffix=-h${N}" >> "$GITHUB_OUTPUT"
+          echo "versionName for this build: 155.0.0-h${N}"
+
       - name: prebuild.sh (patches + configure)
         run: |
           chmod +x prebuild.sh build.sh
           echo "gradle used by mozconfig: $(command -v gradle)"
           # inputs.* are empty on push-triggered runs (defaults apply to
           # workflow_dispatch only) — fall back to the release version.
-          ./prebuild.sh "${{ inputs.version_name || '155.0.0' }}" "${{ inputs.version_code || '1550024' }}"
+          # versionName = upstream base + our -h<N> build suffix (see above).
+          ./prebuild.sh "${{ inputs.version_name || '155.0.0' }}${{ steps.fbn.outputs.suffix }}" "${{ inputs.version_code || '1550025' }}"
           df -h /
 
       - name: Compute unit-test fingerprint
@@ -200,7 +223,7 @@ jobs:
         id: tfp
         run: |
           chmod +x .github/workflows/test_fingerprint.sh
-          FINGERPRINT=$(bash .github/workflows/test_fingerprint.sh "${{ inputs.version_name || '155.0.0' }}" "${{ inputs.version_code || '1550024' }}")
+          FINGERPRINT=$(bash .github/workflows/test_fingerprint.sh "${{ inputs.version_name || '155.0.0' }}" "${{ inputs.version_code || '1550025' }}")
           echo "fingerprint=${FINGERPRINT}" >> "$GITHUB_OUTPUT"
           echo "unit-test fingerprint: ${FINGERPRINT}"
 
@@ -654,7 +677,7 @@ jobs:
           [ -x "$BT/apksigner" ] || { echo "apksigner missing"; ls "$BT"; exit 1; }
           echo "$FENNEC_KEYSTORE_BASE64" | base64 -d > fennec-release.jks
           UNSIGNED="${{ steps.apk.outputs.apk }}"
-          SIGNED="Fennec-${{ inputs.version_code || '1550024' }}-${GITHUB_SHA::7}.apk"
+          SIGNED="Fennec-${{ inputs.version_code || '1550025' }}-${GITHUB_SHA::7}.apk"
           cp "$UNSIGNED" unsigned.apk
           "$BT/zipalign" -f 4 unsigned.apk aligned.apk
           "$BT/apksigner" sign \
@@ -680,16 +703,16 @@ jobs:
         run: |
           set -e
           ls -la Fennec-*.apk
-          TAG="fennec-${{ inputs.version_name || '155.0.0' }}-${{ inputs.version_code || '1550024' }}"
+          TAG="fennec-${{ inputs.version_name || '155.0.0' }}-${{ inputs.version_code || '1550025' }}"
           NOTES_FILE="$(mktemp)"
           {
-            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name || '155.0.0' }} (versionCode ${{ inputs.version_code || '1550024' }})"
+            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name || '155.0.0' }} (versionCode ${{ inputs.version_code || '1550025' }})"
             echo ""
             echo "Built from haasanen/fennecbuild @ ${GITHUB_SHA}"
             echo "Same base as the official Fennec F-Droid build; signed with the fork's permanent release key."
           } > "$NOTES_FILE"
           gh release create "$TAG" "Fennec-"*.apk \
-            --title "Fennec ${{ inputs.version_name || '155.0.0' }} (${{ inputs.version_code || '1550024' }})" \
+            --title "Fennec ${{ inputs.version_name || '155.0.0' }} (${{ inputs.version_code || '1550025' }})" \
             --notes-file "$NOTES_FILE" || \
           gh release upload "$TAG" "Fennec-"*.apk --clobber
 
