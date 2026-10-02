@@ -199,8 +199,13 @@ popd
 
 pushd "$unifiedpush_ac"
 localize_maven
-# Set A-C version
-echo "mozilla.version=${1%.0}" >> local.properties
+# Set A-C version. $1 is the APP versionName and may carry the fork build
+# suffix (155.0.0-h<N>); the A-C dependency version must stay the engine base
+# (155.0) — that is what the 'ac'/'ac_fetch150' stages publish to ~/.m2.
+# Stripping the suffix first keeps ${AC_BASE%.0} == 155.0 for both the plain
+# 155.0.0 name and any -h<N> variant.
+AC_BASE=${1%%-h[0-9]*}
+echo "mozilla.version=${AC_BASE%.0}" >> local.properties
 # Set A-S version
 echo 'as.version=155.0' >> local.properties
 popd
