@@ -232,7 +232,10 @@ popd
 #
 
 pushd "$wasi"
-apply_patch "$mozilla_release/taskcluster/scripts/misc/wasi-sdk.patch"
+# 157 replaced Mozilla's wasi-sdk.patch with two trunk-only patches
+# (wasi-sdk-compat / wasi-sdk-no-llvm-patches) that target the wasi-sdk-23+
+# cmake build; we pin wasi-sdk-20, so carry the 155-era patch in-repo.
+apply_patch "$patches/wasi-sdk.patch"
 popd
 
 #
