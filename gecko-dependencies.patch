@@ -1,8 +1,8 @@
 diff --git a/build/moz.configure/android-sdk.configure b/build/moz.configure/android-sdk.configure
-index e474b72e3642..8540768625d7 100644
+index f51cce8c87..d159cd9b40 100644
 --- a/build/moz.configure/android-sdk.configure
 +++ b/build/moz.configure/android-sdk.configure
-@@ -239,41 +239,6 @@ def android_emulator(sdk_root, android_os_info, want_bootstrap, avd_manifest):
+@@ -256,41 +256,6 @@ def android_emulator(sdk_root, android_os_info, want_bootstrap, avd_manifest):
      )
  
  
@@ -44,7 +44,7 @@ index e474b72e3642..8540768625d7 100644
  @depends(toolchains_base_dir, "--help")
  @imports(_from="os.path", _import="isdir")
  def avd_default_path(toolchains_base_dir, _):
-@@ -353,7 +318,6 @@ set_config("ANDROID_SDK_ROOT", android_sdk_root)
+@@ -373,7 +338,6 @@ set_config("ANDROID_SDK_ROOT", android_sdk_root)
  
  check_android_tools("zipalign", android_build_tools)
  check_android_tools("adb", android_platform_tools)

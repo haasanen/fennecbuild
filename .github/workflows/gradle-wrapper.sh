@@ -11,7 +11,7 @@
 # Pinned versions observed in the repos this build uses:
 #   gmscore (v0.3.16.252432)      -> 8.13
 #   glean (v68.x)                 -> 8.14.3
-#   application-services (v155.0) -> 8.14.3
+#   application-services (v157.0.1) -> 8.14.3
 #   in-tree geckoview/fenix       -> 9.7.0 (default)
 #
 # A single global 9.7.0 does NOT work: gmscore's Android Gradle Plugin

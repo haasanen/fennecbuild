@@ -1,5 +1,5 @@
 diff --git a/toolkit/crashreporter/jar.mn b/toolkit/crashreporter/jar.mn
-index 641fcaa2fed38..c85a47ec5ca55 100644
+index 641fcaa2fe..c85a47ec5c 100644
 --- a/toolkit/crashreporter/jar.mn
 +++ b/toolkit/crashreporter/jar.mn
 @@ -3,7 +3,7 @@

@@ -1,0 +1,37 @@
+diff --git a/mobile/android/android-components/components/feature/push/build.gradle b/mobile/android/android-components/components/feature/push/build.gradle
+index c006aa5a39..b2d0d92e78 100644
+--- a/mobile/android/android-components/components/feature/push/build.gradle
++++ b/mobile/android/android-components/components/feature/push/build.gradle
+@@ -12,6 +12,7 @@ android {
+ }
+ 
+ dependencies {
++    implementation 'org.ironfoxoss.unifiedpush:unifiedpush:0.0.1-+'
+     implementation project(':components:concept-push')
+     implementation project(':components:support-base')
+ 
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
+index 0f7d094c30..4dc8ee307d 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
+@@ -2407,6 +2407,20 @@ class Settings(
+             default = { FxNimbus.features.remoteSearchConfiguration.value().enabled },
+         )
+ 
++    /** Indicates if UnifiedPush can be used */
++    var enableUnifiedPush by
++        booleanPreference(
++            key = appContext.getPreferenceKey(R.string.pref_key_enable_unifiedpush),
++            default = true,
++        )
++
++    /** Indicates if UnifiedPush is used */
++    var useUnifiedPush by
++        booleanPreference(
++            key = appContext.getPreferenceKey(R.string.pref_key_use_unifiedpush),
++            default = false,
++        )
++
+     /** Get the current mode for how https-only is enabled. */
+     fun getHttpsOnlyMode(): HttpsOnlyMode {
+         return if (!shouldUseHttpsOnly) {

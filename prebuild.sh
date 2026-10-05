@@ -200,14 +200,14 @@ popd
 pushd "$unifiedpush_ac"
 localize_maven
 # Set A-C version. $1 is the APP versionName and may carry the fork build
-# suffix (155.0.0-h<N>); the A-C dependency version must stay the engine base
-# (155.0) — that is what the 'ac'/'ac_fetch150' stages publish to ~/.m2.
-# Stripping the suffix first keeps ${AC_BASE%.0} == 155.0 for both the plain
-# 155.0.0 name and any -h<N> variant.
+# suffix (157.0.0-h<N>); the A-C dependency version must stay the engine base
+# (157.0) — that is what the 'ac'/'ac_fetch150' stages publish to ~/.m2.
+# Stripping the suffix first keeps ${AC_BASE%.0} == 157.0 for both the plain
+# 157.0.0 name and any -h<N> variant.
 AC_BASE=${1%%-h[0-9]*}
 echo "mozilla.version=${AC_BASE%.0}" >> local.properties
 # Set A-S version
-echo 'as.version=155.0' >> local.properties
+echo 'as.version=157.0' >> local.properties
 popd
 
 #
@@ -275,9 +275,11 @@ apply_patch "$patches/gecko-rust-small-memory.patch"
 # Add "marionette.hide" option into about:config
 apply_patch "$patches/gecko-option-to-hide-marionette.patch"
 
-# Add UnifiedPush support
-apply_patch "$unifiedpush_ac/patches/a-c-unifiedpush.patch"
-apply_patch "$unifiedpush_ac/patches/fenix-unifiedpush.patch"
+# Add UnifiedPush support. The patches are fork-owned (regenerated for the
+# 157 tree); the UnifiedPushAC clone is still used for its maven-localize
+# and version wiring, but its 1.0.6-era patch files no longer apply to 157.
+apply_patch "$patches/a-c-unifiedpush.patch"
+apply_patch "$patches/fenix-unifiedpush.patch"
 
 # Patch the use of proprietary and tracking libraries
 apply_patch "$patches/a-c-liberate.patch"

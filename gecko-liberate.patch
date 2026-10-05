@@ -1,8 +1,8 @@
 diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
-index c2e19e45d814..1d11180e8bde 100644
+index a8e645e7f4..79cace68f5 100644
 --- a/mobile/android/geckoview/build.gradle
 +++ b/mobile/android/geckoview/build.gradle
-@@ -192,7 +192,7 @@ dependencies {
+@@ -194,7 +194,7 @@ dependencies {
      implementation libs.androidx.core
      implementation libs.androidx.lifecycle.common
      implementation libs.androidx.lifecycle.process
@@ -12,10 +12,10 @@ index c2e19e45d814..1d11180e8bde 100644
  
      if (mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
-index 754ce5b7815c..aa67916f8da6 100644
+index 76cdb4b98d..efb17c0e3b 100644
 --- a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
-@@ -199,27 +199,14 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+@@ -200,27 +200,14 @@ import org.mozilla.gecko.util.WebAuthnUtils;
  
        final Task<PendingIntent> intentTask;
  
@@ -51,7 +51,7 @@ index 754ce5b7815c..aa67916f8da6 100644
  
        intentTask.addOnSuccessListener(
            pendingIntent -> {
-@@ -435,19 +422,12 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+@@ -439,19 +426,12 @@ import org.mozilla.gecko.util.WebAuthnUtils;
                .build();
  
        final Task<PendingIntent> intentTask;
@@ -76,7 +76,7 @@ index 754ce5b7815c..aa67916f8da6 100644
  
        intentTask.addOnSuccessListener(
            pendingIntent -> {
-@@ -598,15 +578,9 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+@@ -605,15 +585,9 @@ import org.mozilla.gecko.util.WebAuthnUtils;
    @WrapForJNI(calledFrom = "gecko")
    private static GeckoResult<Boolean> webAuthnIsUserVerifyingPlatformAuthenticatorAvailable() {
      final Task<Boolean> task;

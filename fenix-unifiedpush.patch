@@ -1,0 +1,207 @@
+diff --git a/mobile/android/fenix/app/build.gradle b/mobile/android/fenix/app/build.gradle
+index 2848013545..9576a39237 100644
+--- a/mobile/android/fenix/app/build.gradle
++++ b/mobile/android/fenix/app/build.gradle
+@@ -687,6 +687,7 @@ dependencies {
+     androidTestUtil libs.androidx.test.orchestrator
+ 
+     lintChecks project(':components:tooling-lint')
++    implementation 'org.ironfoxoss.unifiedpush:unifiedpush:0.0.1-+'
+ }
+ 
+ protobuf {
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
+index 35903275d6..fe9a60d234 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
+@@ -53,7 +53,7 @@ import mozilla.components.concept.ai.controls.isEnabled
+ import mozilla.components.concept.base.crash.Breadcrumb
+ import mozilla.components.concept.engine.webextension.WebExtension
+ import mozilla.components.concept.engine.webextension.isUnsupported
+-import mozilla.components.concept.push.PushProcessor
++// import mozilla.components.concept.push.PushProcessor
+ import mozilla.components.concept.storage.FrecencyThresholdOption
+ import mozilla.components.feature.addons.migration.DefaultSupportedAddonsChecker
+ import mozilla.components.feature.addons.update.GlobalAddonDependencyProvider
+@@ -691,7 +691,7 @@ open class FenixApplication : Application(), Provider, ThemeProvider {
+             logger.info("AutoPushFeature is configured, initializing it...")
+ 
+             // Install the AutoPush singleton to receive messages.
+-            PushProcessor.install(it)
++//            PushProcessor.install(it)
+ 
+             WebPushEngineIntegration(components.core.engine, it).start()
+ 
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
+index dd11013b62..464f8d4279 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
+@@ -9,7 +9,13 @@ import androidx.core.net.toUri
+ import mozilla.components.feature.push.AutoPushFeature
+ import mozilla.components.feature.push.Protocol
+ import mozilla.components.feature.push.PushConfig
+-import mozilla.components.lib.crash.CrashReporter
++import android.app.Activity
++import android.os.StrictMode
++import mozilla.components.support.base.android.NotificationsDelegate
++import org.ironfoxoss.unifiedpush.Pusher
++import org.ironfoxoss.unifiedpush.UnifiedPushFeature
++import org.ironfoxoss.unifiedpush.UnifiedPushNotification
++import org.mozilla.fenix.perf.StrictModeManager
+ import mozilla.components.support.base.log.logger.Logger
+ import org.mozilla.fenix.R
+ import org.mozilla.fenix.ext.components
+@@ -20,18 +26,68 @@ import org.mozilla.fenix.push.FirebasePushService
+  * Component group for push services. These components use services that strongly depend on push messaging (e.g.
+  * WebPush, SendTab).
+  */
+-class Push(val context: Context, crashReporter: CrashReporter) {
+-    val feature by lazyMonitored {
+-        pushConfig?.let { config ->
++class Push(val context: Context, val strictMode: StrictModeManager = context.components.strictMode, val notificationsDelegate: NotificationsDelegate = context.components.notificationsDelegate, val iAutoPushFeature: AutoPushFeature? = null, val iUnifiedPushFeature: UnifiedPushFeature? = null) {
++    private val logger = Logger("Push")
++    val feature: Pusher?
++        get() = strictMode.allowViolation(StrictMode::allowThreadDiskReads) {
++            if (context.components.settings.ironfox.useUnifiedPush) {
++                unifiedPushFeature.also { feature ->
++                    if (feature.isAvailable(context)) {
++                        logger.info("Using UnifiedPush")
++                        autoPushFeature?.let {
++                            it.initialize()
++                            feature.migrateFrom(it)
++                        }
++                    } else {
++                        logger.warn(
++                            "UnifiedPush distributor has been uninstalled, " +
++                                    "the feature is disabled for the moment."
++                        )
++                        val notificationId = UnifiedPushNotification.getNotificationId(context)
++                        val notification = UnifiedPushNotification.createMissingServiceNotification(context)
++                        notificationsDelegate.notify(
++                            notificationId = notificationId,
++                            notification = notification
++                        )
++                        context.components.settings.ironfox.useUnifiedPush = false
++                    }
++                }
++            } else {
++                logger.info("Using AutoPush")
++                autoPushFeature?.also { feature ->
++                    feature.migrateFrom(unifiedPushFeature)
++                }
++            }
++        }
++    private val autoPushFeature by lazyMonitored {
++        iAutoPushFeature
++            ?: pushConfig?.let { config ->
+             AutoPushFeature(
+                 context = context,
+                 service = pushService,
+                 config = config,
+-                crashReporter = crashReporter,
+             )
+         }
+     }
+-
++    private val unifiedPushFeature by lazyMonitored {
++        iUnifiedPushFeature
++            ?: UnifiedPushFeature(
++            context = context,
++            disableRateLimit = true,
++        )
++    }
++    private fun Pusher.migrateFrom(old: Pusher) {
++        old.forEachScopes { scope, vapid ->
++            this.subscribe(scope, vapid)
++        }
++        old.shutdown()
++    }
++    fun switchToUnifiedPush(activity: Activity, callback: (Boolean) -> Unit) {
++        unifiedPushFeature.useDefaultDistributor(activity, callback)
++    }
++    fun switchToAutoPush(context: Context) {
++        unifiedPushFeature.removeCurrentDistributor(context)
++    }
+     private val pushConfig: PushConfig? by lazyMonitored {
+         val logger = Logger("PushConfig")
+         val projectIdKey = context.getString(R.string.pref_key_push_project_id)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/PushFxaIntegration.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/PushFxaIntegration.kt
+index caf1741ddc..fa8451f683 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/PushFxaIntegration.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/PushFxaIntegration.kt
+@@ -13,8 +13,9 @@ import mozilla.components.concept.sync.AuthType
+ import mozilla.components.concept.sync.OAuthAccount
+ import mozilla.components.feature.accounts.push.FxaPushSupportFeature
+ import mozilla.components.feature.accounts.push.SendTabFeature
+-import mozilla.components.feature.push.AutoPushFeature
+-import mozilla.components.feature.push.PushScope
++import org.ironfoxoss.unifiedpush.PushObserver
++import org.ironfoxoss.unifiedpush.PushScope
++import org.ironfoxoss.unifiedpush.Pusher
+ import mozilla.components.service.fxa.manager.FxaAccountManager
+ import mozilla.components.service.fxa.manager.ext.withConstellationIfExists
+ import org.mozilla.fenix.components.BackgroundServices
+@@ -50,7 +51,7 @@ import org.mozilla.fenix.components.Push
+  * importantly, maintainable.
+  */
+ class PushFxaIntegration(
+-    private val pushFeature: AutoPushFeature,
++    private val pushFeature: Pusher,
+     lazyAccountManager: Lazy<FxaAccountManager>,
+ ) {
+     private val observer =
+@@ -72,8 +73,8 @@ class PushFxaIntegration(
+ /** Observes push messages from [AutoPushFeature], then initializes [FxaAccountManager] if it isn't already. */
+ internal class OneTimePushMessageObserver(
+     private val lazyAccountManager: Lazy<FxaAccountManager>,
+-    private val pushFeature: AutoPushFeature,
+-) : AutoPushFeature.Observer {
++    private val pushFeature: Pusher,
++) : PushObserver {
+     override fun onMessageReceived(scope: PushScope, message: ByteArray?) {
+         // Ignore empty push messages.
+         val rawBytes = message ?: return
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/WebPushEngineIntegration.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/WebPushEngineIntegration.kt
+index 25990df463..4855a6f06c 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/WebPushEngineIntegration.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/push/WebPushEngineIntegration.kt
+@@ -12,15 +12,17 @@ import mozilla.components.concept.engine.Engine
+ import mozilla.components.concept.engine.webpush.WebPushDelegate
+ import mozilla.components.concept.engine.webpush.WebPushHandler
+ import mozilla.components.concept.engine.webpush.WebPushSubscription
+-import mozilla.components.feature.push.AutoPushFeature
+-import mozilla.components.feature.push.AutoPushSubscription
+-import mozilla.components.feature.push.PushScope
++import org.ironfoxoss.unifiedpush.AutoPushSubscription
++import org.ironfoxoss.unifiedpush.PushObserver
++import org.ironfoxoss.unifiedpush.PushScope
++import org.ironfoxoss.unifiedpush.PushSubscriptionProcessor
++import org.ironfoxoss.unifiedpush.Pusher
+ import mozilla.components.support.base.log.logger.Logger
+ 
+ /** Engine integration with the push feature to enable WebPush support. */
+ class WebPushEngineIntegration(
+     private val engine: Engine,
+-    private val pushFeature: AutoPushFeature,
++    private val pushFeature: Pusher,
+     private val coroutineScope: CoroutineScope = MainScope(),
+     stringDecoder: (String) -> ByteArray = { s ->
+         Base64.decode(s.toByteArray(), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+@@ -28,7 +30,7 @@ class WebPushEngineIntegration(
+     byteArrayEncoder: (ByteArray) -> String = { ba ->
+         Base64.encodeToString(ba, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+     },
+-) : AutoPushFeature.Observer {
++) : PushObserver {
+ 
+     private var handler: WebPushHandler? = null
+     private val delegate = WebPushEngineDelegate(pushFeature, stringDecoder, byteArrayEncoder)
+@@ -57,7 +59,7 @@ class WebPushEngineIntegration(
+ }
+ 
+ internal class WebPushEngineDelegate(
+-    private val pushFeature: AutoPushFeature,
++    private val pushFeature: PushSubscriptionProcessor,
+     private val stringDecoder: (String) -> ByteArray,
+     private val byteArrayEncoder: (ByteArray) -> String,
+ ) : WebPushDelegate {

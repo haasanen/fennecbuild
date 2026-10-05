@@ -1,8 +1,31 @@
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+index 2fce57b3c0..7ff1b392bb 100644
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -3,6 +3,10 @@
+ android-gradle-plugin = "9.4.0" # Keep lint version in sync
+ android-lint = "32.4.0"
+ 
++# CBOR (RFC 8949) for the in-process CTAP2 security-key stack (upokecenter;
++# transitive deps: com.github.peteroupc:datautilities, :numbers)
++cbor = "4.5.6"
++
+ # Kotlin
+ coroutines = "1.11.0"
+ kotlin = "2.4.20"
+@@ -223,6 +227,7 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
+ 
+ # Google other
+ accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
++cbor = { module = "com.upokecenter:cbor", version.ref = "cbor" }
+ google-material = { module = "com.google.android.material:material", version.ref = "material" }
+ ksp-symbol-processing-aa = { module = "com.google.devtools.ksp:symbol-processing-aa", version.ref = "ksp" }
+ ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "ksp" }
 diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
-index 79cace68f5ffcbc6fef93b8e85626c3f34b264f4..71adba1b96105c268388391c1b52d33de0ae8c80 100644
+index 79cace68f5..71adba1b96 100644
 --- a/mobile/android/geckoview/build.gradle
 +++ b/mobile/android/geckoview/build.gradle
-@@ -194,7 +194,7 @@
+@@ -194,7 +194,7 @@ dependencies {
      implementation libs.androidx.core
      implementation libs.androidx.lifecycle.common
      implementation libs.androidx.lifecycle.process
@@ -11,31 +34,8 @@ index 79cace68f5ffcbc6fef93b8e85626c3f34b264f4..71adba1b96105c268388391c1b52d33d
      implementation "org.yaml:snakeyaml:2.2"
  
      if (mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
-diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index a4a67c769ce3b144d05b7c88788313ac48160666..2e5436898c1f2e170d5f8f3d1b7971c064620877 100644
---- a/gradle/libs.versions.toml
-+++ b/gradle/libs.versions.toml
-@@ -3,6 +3,10 @@
- android-gradle-plugin = "9.2.1" # Keep lint version in sync
- android-lint = "32.2.1"
- 
-+# CBOR (RFC 8949) for the in-process CTAP2 security-key stack (upokecenter;
-+# transitive deps: com.github.peteroupc:datautilities, :numbers)
-+cbor = "4.5.6"
-+
- # Kotlin
- coroutines = "1.11.0"
- kotlin = "2.4.10"
-@@ -221,6 +225,7 @@
- 
- # Google other
- accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
-+cbor = { module = "com.upokecenter:cbor", version.ref = "cbor" }
- google-material = { module = "com.google.android.material:material", version.ref = "material" }
- ksp-symbol-processing-aa = { module = "com.google.devtools.ksp:symbol-processing-aa", version.ref = "ksp" }
- ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "ksp" }
 diff --git a/mobile/android/geckoview/src/main/AndroidManifest.xml b/mobile/android/geckoview/src/main/AndroidManifest.xml
-index 83bfdf85e6283aa6f3cdcb593fcef1e887e385b5..186a662b159aaa71757e13bbae6bfcf50ac3d824 100644
+index 83bfdf85e6..186a662b15 100644
 --- a/mobile/android/geckoview/src/main/AndroidManifest.xml
 +++ b/mobile/android/geckoview/src/main/AndroidManifest.xml
 @@ -10,6 +10,8 @@
@@ -61,832 +61,9 @@ index 83bfdf85e6283aa6f3cdcb593fcef1e887e385b5..186a662b159aaa71757e13bbae6bfcf5
      <uses-feature
              android:name="android.hardware.camera.autofocus"
              android:required="false"/>
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
-index efb17c0e3b2accc230a3f7f32a7c9d14c73f4ed9..54872b22334cc861419af1a10c1998594cae6725 100644
---- a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
-+++ b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
-@@ -5,48 +5,18 @@
- package org.mozilla.geckoview;
- 
- import android.annotation.SuppressLint;
--import android.app.PendingIntent;
--import android.net.Uri;
-+import android.content.pm.PackageManager;
- import android.os.Build;
- import android.util.Log;
- import androidx.annotation.UiThread;
--import com.google.android.gms.fido.Fido;
--import com.google.android.gms.fido.fido2.Fido2ApiClient;
--import com.google.android.gms.fido.fido2.Fido2PrivilegedApiClient;
--import com.google.android.gms.fido.fido2.api.common.Algorithm;
--import com.google.android.gms.fido.fido2.api.common.Attachment;
--import com.google.android.gms.fido.fido2.api.common.AttestationConveyancePreference;
--import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensions;
--import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensionsClientOutputs;
--import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensionsCredPropsOutputs;
--import com.google.android.gms.fido.fido2.api.common.AuthenticatorAssertionResponse;
--import com.google.android.gms.fido.fido2.api.common.AuthenticatorAttestationResponse;
--import com.google.android.gms.fido.fido2.api.common.AuthenticatorErrorResponse;
--import com.google.android.gms.fido.fido2.api.common.AuthenticatorResponse;
--import com.google.android.gms.fido.fido2.api.common.AuthenticatorSelectionCriteria;
--import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialCreationOptions;
--import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialRequestOptions;
--import com.google.android.gms.fido.fido2.api.common.EC2Algorithm;
--import com.google.android.gms.fido.fido2.api.common.FidoAppIdExtension;
--import com.google.android.gms.fido.fido2.api.common.FidoCredentialDetails;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredential;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialCreationOptions;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialDescriptor;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialParameters;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRequestOptions;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRpEntity;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialType;
--import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialUserEntity;
--import com.google.android.gms.fido.fido2.api.common.RSAAlgorithm;
--import com.google.android.gms.fido.fido2.api.common.ResidentKeyRequirement;
--import com.google.android.gms.tasks.Task;
- import java.nio.ByteBuffer;
- import java.util.ArrayList;
--import java.util.Arrays;
- import java.util.List;
- import org.mozilla.gecko.GeckoAppShell;
- import org.mozilla.gecko.WebAuthnCredentialManager;
- import org.mozilla.gecko.annotation.WrapForJNI;
-+import org.mozilla.gecko.ctap2.Ctap2Cbor;
-+import org.mozilla.gecko.ctap2.WebAuthnCtap2;
- import org.mozilla.gecko.util.GeckoBundle;
- import org.mozilla.gecko.util.ThreadUtils;
- import org.mozilla.gecko.util.WebAuthnUtils;
-@@ -55,243 +25,85 @@
-   private static final String LOGTAG = "WebAuthnTokenManager";
-   private static final boolean DEBUG = false;
- 
--  private static final Algorithm[] SUPPORTED_ALGORITHMS = {
--    EC2Algorithm.ES256,
--    EC2Algorithm.ES384,
--    EC2Algorithm.ES512,
--    EC2Algorithm.ED256, /* no ED384 */
--    EC2Algorithm.ED512,
--    RSAAlgorithm.PS256,
--    RSAAlgorithm.PS384,
--    RSAAlgorithm.PS512,
--    RSAAlgorithm.RS256,
--    RSAAlgorithm.RS384,
--    RSAAlgorithm.RS512
--  };
-+  // Fallback when the relying party sends no pubKeyCredParams: ES256 (CTAP2 defaults).
-+  private static final int[] DEFAULT_COSE_ALGS = {-7};
- 
--  private static PublicKeyCredentialCreationOptions getRequestOptionsForMakeCredential(
-+  @UiThread
-+  private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredentialWithCtap2(
-       final GeckoBundle credentialBundle,
-       final byte[] userId,
--      final byte[] challenge,
-       final WebAuthnUtils.WebAuthnPublicCredential[] excludeList,
-       final GeckoBundle authenticatorSelection,
--      final GeckoBundle extensions) {
--    final PublicKeyCredentialCreationOptions.Builder requestBuilder =
--        new PublicKeyCredentialCreationOptions.Builder();
--
--    final List<PublicKeyCredentialParameters> params =
--        new ArrayList<PublicKeyCredentialParameters>();
--
--    // WebAuthn supports more algorithms
--    for (final Algorithm algo : SUPPORTED_ALGORITHMS) {
--      params.add(
--          new PublicKeyCredentialParameters(
--              PublicKeyCredentialType.PUBLIC_KEY.toString(), algo.getAlgoValue()));
-+      final GeckoBundle extensions,
-+      final int[] algs,
-+      final byte[] clientDataHashBytes) {
-+    ThreadUtils.assertOnUiThread();
-+
-+    final GeckoBundle rpBundle = credentialBundle.getBundle("rp");
-+    if (rpBundle == null) {
-+      return GeckoResult.fromException(new WebAuthnUtils.Exception("DATA_ERR"));
-     }
-+    final String rpId = rpBundle.getString("id", "");
-+    final String rpName = rpBundle.getString("name", "");
- 
-+    String userName = "";
-+    String userDisplayName = "";
-     final GeckoBundle userBundle = credentialBundle.getBundle("user");
--    final PublicKeyCredentialUserEntity user =
--        new PublicKeyCredentialUserEntity(
--            userId,
--            userBundle.getString("name", ""),
--            /* deprecated userIcon field */ "",
--            userBundle.getString("displayName", ""));
--
--    AttestationConveyancePreference pref = AttestationConveyancePreference.NONE;
--    final String attestationPreference = credentialBundle.getString("attestation", "NONE");
--    if (attestationPreference.equalsIgnoreCase(AttestationConveyancePreference.DIRECT.name())) {
--      pref = AttestationConveyancePreference.DIRECT;
--    } else if (attestationPreference.equalsIgnoreCase(
--        AttestationConveyancePreference.INDIRECT.name())) {
--      pref = AttestationConveyancePreference.INDIRECT;
--    }
--
--    final AuthenticatorSelectionCriteria.Builder selBuild =
--        new AuthenticatorSelectionCriteria.Builder();
--    final String authenticatorAttachment =
--        authenticatorSelection.getString("authenticatorAttachment", "");
--    if (authenticatorAttachment.equals("platform")) {
--      selBuild.setAttachment(Attachment.PLATFORM);
--    } else if (authenticatorAttachment.equals("cross-platform")) {
--      selBuild.setAttachment(Attachment.CROSS_PLATFORM);
-+    if (userBundle != null) {
-+      userName = userBundle.getString("name", "");
-+      userDisplayName = userBundle.getString("displayName", "");
-     }
--    final String residentKey = authenticatorSelection.getString("residentKey", "");
--    if (residentKey.equals("required")) {
--      selBuild
--          .setRequireResidentKey(true)
--          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_REQUIRED);
--    } else if (residentKey.equals("preferred")) {
--      selBuild
--          .setRequireResidentKey(false)
--          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_PREFERRED);
--    } else if (residentKey.equals("discouraged")) {
--      selBuild
--          .setRequireResidentKey(false)
--          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_DISCOURAGED);
--    }
--    final AuthenticatorSelectionCriteria sel = selBuild.build();
- 
--    final AuthenticationExtensions.Builder extBuilder = new AuthenticationExtensions.Builder();
--    if (extensions.containsKey("fidoAppId")) {
--      extBuilder.setFido2Extension(new FidoAppIdExtension(extensions.getString("fidoAppId")));
-+    final List<Ctap2Cbor.PublicKeyCredParam> pubKeyCredParams =
-+        new ArrayList<Ctap2Cbor.PublicKeyCredParam>();
-+    if (algs != null) {
-+      for (final int alg : algs) {
-+        pubKeyCredParams.add(new Ctap2Cbor.PublicKeyCredParam(alg));
-+      }
-+    }
-+    if (pubKeyCredParams.isEmpty()) {
-+      for (final int alg : DEFAULT_COSE_ALGS) {
-+        pubKeyCredParams.add(new Ctap2Cbor.PublicKeyCredParam(alg));
-+      }
-     }
--    final AuthenticationExtensions ext = extBuilder.build();
--
--    // userVerification are not yet consumed by Android's FIDO API
- 
--    final List<PublicKeyCredentialDescriptor> excludedList =
--        new ArrayList<PublicKeyCredentialDescriptor>();
-+    final List<Ctap2Cbor.CredentialId> excludeIds = new ArrayList<Ctap2Cbor.CredentialId>();
-     for (final WebAuthnUtils.WebAuthnPublicCredential cred : excludeList) {
--      excludedList.add(
--          new PublicKeyCredentialDescriptor(
--              PublicKeyCredentialType.PUBLIC_KEY.toString(),
--              cred.id,
--              WebAuthnUtils.getTransportsForByte(cred.transports)));
-+      excludeIds.add(new Ctap2Cbor.CredentialId(cred.id));
-     }
- 
--    final GeckoBundle rpBundle = credentialBundle.getBundle("rp");
--    final PublicKeyCredentialRpEntity rp =
--        new PublicKeyCredentialRpEntity(
--            rpBundle.getString("id"),
--            rpBundle.getString("name", ""),
--            /* deprecated rpIcon field */ "");
--
--    return requestBuilder
--        .setUser(user)
--        .setAttestationConveyancePreference(pref)
--        .setAuthenticatorSelection(sel)
--        .setAuthenticationExtensions(ext)
--        .setChallenge(challenge)
--        .setRp(rp)
--        .setParameters(params)
--        .setTimeoutSeconds(credentialBundle.getLong("timeout") / 1000.0)
--        .setExcludeList(excludedList)
--        .build();
--  }
--
--  @UiThread
--  private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredential(
--      final GeckoBundle credentialBundle,
--      final byte[] userId,
--      final byte[] challenge,
--      final WebAuthnUtils.WebAuthnPublicCredential[] excludeList,
--      final GeckoBundle authenticatorSelection,
--      final GeckoBundle extensions) {
--    ThreadUtils.assertOnUiThread();
--
--    if (!credentialBundle.containsKey("isWebAuthn")) {
--      // FIDO U2F not supported by Android (for us anyway) at this time
--      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
--    }
-+    // "required" only: rk is an authenticator option a plain security key may reject as
-+    // unsupported, so it is sent only when the relying party insists on a resident credential.
-+    // (authSelBundle only carries "residentKey" when the RP asked credProps and the
-+    // geckoview residentkey pref is on — see AndroidWebAuthnService::MakeCredential.)
-+    final boolean hasResidentKeyOption = authenticatorSelection.containsKey("residentKey");
-+    final String residentKey = authenticatorSelection.getString("residentKey", "");
-+    final boolean residentKeyRequested = "required".equals(residentKey);
- 
--    final GeckoResult<WebAuthnUtils.MakeCredentialResponse> result = new GeckoResult<>();
--    try {
--      final PublicKeyCredentialCreationOptions requestOptions =
--          getRequestOptionsForMakeCredential(
--              credentialBundle, userId, challenge, excludeList, authenticatorSelection, extensions);
--
--      final Uri origin = Uri.parse(credentialBundle.getString("origin"));
--
--      final BrowserPublicKeyCredentialCreationOptions browserOptions =
--          new BrowserPublicKeyCredentialCreationOptions.Builder()
--              .setPublicKeyCredentialCreationOptions(requestOptions)
--              .setOrigin(origin)
--              .build();
--
--      final Task<PendingIntent> intentTask;
--
--      // The privileged FIDO2 API normally is restricted to apps with package
--      // names and signatures that Google knows to be a browser. microG does not
--      // have such a list, instead it asks the user to confirm that the app doing
--      // the request is indeed a browser app (only for the first request from
--      // that app).
--      final Fido2PrivilegedApiClient fidoClient =
--          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
--      intentTask = fidoClient.getRegisterPendingIntent(browserOptions);
--
--      intentTask.addOnSuccessListener(
--          pendingIntent -> {
--            GeckoRuntime.getInstance()
--                .startActivityForResult(pendingIntent)
--                .accept(
--                    intent -> {
--                      if (!intent.hasExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA)) {
--                        Log.w(LOGTAG, "Failed to get credential data in FIDO intent");
--                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
--                        return;
--                      }
--                      final byte[] rspData =
--                          intent.getByteArrayExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA);
--                      final PublicKeyCredential publicKeyCredentialData =
--                          PublicKeyCredential.deserializeFromBytes(rspData);
--
--                      final AuthenticatorResponse response = publicKeyCredentialData.getResponse();
--                      final WebAuthnUtils.Exception error = parseErrorResponse(response);
--                      if (error != null) {
--                        result.completeExceptionally(error);
--                        return;
--                      }
--
--                      if (!(response instanceof AuthenticatorAttestationResponse)) {
--                        Log.w(LOGTAG, "Failed to get attestation response in FIDO intent");
--                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
--                        return;
--                      }
--
--                      final WebAuthnUtils.MakeCredentialResponse.Builder builder =
--                          new WebAuthnUtils.MakeCredentialResponse.Builder();
--
--                      // credProps is optional.
--                      final AuthenticationExtensionsClientOutputs extensionsClientOutputsData =
--                          publicKeyCredentialData.getClientExtensionResults();
--                      if (extensionsClientOutputsData != null) {
--                        final AuthenticationExtensionsCredPropsOutputs credPropsOutput =
--                            extensionsClientOutputsData.getCredProps();
--                        if (credPropsOutput != null) {
--                          builder.setCredProps(credPropsOutput.getIsDiscoverableCredential());
--                        }
--                      }
--
--                      final AuthenticatorAttestationResponse responseData =
--                          (AuthenticatorAttestationResponse) response;
--                      final WebAuthnUtils.MakeCredentialResponse credentialResponse =
--                          builder
--                              .setKeyHandle(publicKeyCredentialData.getRawId())
--                              .setAuthenticatorAttachment(
--                                  publicKeyCredentialData.getAuthenticatorAttachment())
--                              .setClientDataJson(responseData.getClientDataJSON())
--                              .setAttestationObject(responseData.getAttestationObject())
--                              .setTransports(responseData.getTransports())
--                              .build();
--
--                      Log.d(LOGTAG, "MakeCredentialResponse: " + credentialResponse.toString());
--                      result.complete(credentialResponse);
--                    },
--                    e -> {
--                      Log.w(LOGTAG, "Failed to launch activity: ", e);
--                      result.completeExceptionally(new WebAuthnUtils.Exception("ABORT_ERR"));
--                    });
--          });
--
--      intentTask.addOnFailureListener(
--          e -> {
--            Log.w(LOGTAG, "Failed to get FIDO intent", e);
--            result.completeExceptionally(new WebAuthnUtils.Exception("ABORT_ERR"));
--          });
--    } catch (final java.lang.Exception e) {
--      // We need to ensure we catch any possible exception here in order to ensure
--      // that the Promise on the content side is appropriately rejected. In particular,
--      // we will get `NoClassDefFoundError` if we're running on a device that does not
--      // have Google Play Services.
--      Log.w(LOGTAG, "Couldn't make credential", e);
--      return GeckoResult.fromException(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
--    }
--    return result;
-+    // uv is likewise sent only when the relying party requires it; a roaming key without a
-+    // local verification gesture fails an unrequested uv=true with CTAP2_ERR_UNSUPPORTED_OPTION.
-+    final String userVerification = authenticatorSelection.getString("userVerification", "");
-+    final boolean uvRequired = "required".equals(userVerification);
-+
-+    if (DEBUG) {
-+      Log.d(LOGTAG, "CTAP2 makeCredential rp=" + rpId + " algs=" + algs.length);
-+    }
-+
-+    return WebAuthnCtap2.makeCredential(
-+        rpId,
-+        rpName,
-+        userId,
-+        userName,
-+        userDisplayName,
-+        clientDataHashBytes,
-+        pubKeyCredParams,
-+        excludeIds,
-+        residentKeyRequested,
-+        uvRequired,
-+        hasResidentKeyOption);
-   }
- 
--  // ThreadConstraint false positive: runs in a GeckoResult continuation on the UI thread, which
--  // lint cannot model.
--  @SuppressLint("ThreadConstraint")
-+  @SuppressLint("WrongThread")
-   @WrapForJNI(calledFrom = "gecko")
-   private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> webAuthnMakeCredential(
-       final GeckoBundle credentialBundle,
-@@ -325,173 +137,72 @@
-         new WebAuthnUtils.WebAuthnPublicCredential[idList.length];
-     excludeArrayList.toArray(excludeList);
- 
-+    if (!credentialBundle.containsKey("isWebAuthn")) {
-+      // FIDO U2F not supported by Android (for us anyway) at this time
-+      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
-+    }
-+
-     final GeckoResult<WebAuthnUtils.MakeCredentialResponse> result = new GeckoResult<>();
- 
-     ThreadUtils.runOnUiThread(
-         () -> {
-+          // Credential Manager first: it owns passkeys when a provider is installed.
-+          // Without a provider (e.g. a GMS-free OS) it fails NOT_SUPPORTED_ERR and the
-+          // roaming security key (CTAP2 over USB/NFC, no external FIDO service) answers.
-           WebAuthnCredentialManager.makeCredential(
-                   credentialBundle.getString("origin"), clientDataHashBytes, requestJSON)
-               .accept(
-                   response -> result.complete(response),
-                   exceptionInCredManager -> {
--                    if (!exceptionInCredManager.getMessage().equals("NOT_SUPPORTED_ERR")) {
-+                    if (exceptionInCredManager == null
-+                        || exceptionInCredManager.getMessage() == null
-+                        || !exceptionInCredManager
-+                            .getMessage()
-+                            .equals("NOT_SUPPORTED_ERR")) {
-                       result.completeExceptionally(exceptionInCredManager);
-                       return;
-                     }
--                    ThreadUtils.runOnUiThread(
--                        () -> {
--                          // If supported error, we try to use GMS FIDO2.
--                          makeCredential(
--                                  credentialBundle,
--                                  userBytes,
--                                  challBytes,
--                                  excludeList,
--                                  authenticatorSelection,
--                                  extensions)
--                              .accept(
--                                  response -> result.complete(response),
--                                  exceptionInGMS -> result.completeExceptionally(exceptionInGMS));
--                        });
-+                    makeCredentialWithCtap2(
-+                            credentialBundle,
-+                            userBytes,
-+                            excludeList,
-+                            authenticatorSelection,
-+                            extensions,
-+                            algs,
-+                            clientDataHashBytes)
-+                        .accept(
-+                            response -> result.complete(response),
-+                            exceptionInCtap2 ->
-+                                result.completeExceptionally(exceptionInCtap2));
-                   });
-         });
-     return result;
-   }
- 
--  private static WebAuthnUtils.Exception parseErrorResponse(final AuthenticatorResponse response) {
--    if (!(response instanceof AuthenticatorErrorResponse)) {
--      return null;
--    }
--
--    final AuthenticatorErrorResponse responseData = (AuthenticatorErrorResponse) response;
--
--    Log.e(LOGTAG, "errorCode.name: " + responseData.getErrorCode());
--    Log.e(LOGTAG, "errorMessage: " + responseData.getErrorMessage());
--
--    return new WebAuthnUtils.Exception(responseData.getErrorCode().name());
--  }
--
--  private static PublicKeyCredentialRequestOptions getRequestOptionsForGetAssertion(
--      final byte[] challenge,
-+  private static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertionWithCtap2(
-       final WebAuthnUtils.WebAuthnPublicCredential[] allowList,
-       final GeckoBundle assertionBundle,
--      final GeckoBundle extensions) {
--    final List<PublicKeyCredentialDescriptor> allowedList =
--        new ArrayList<PublicKeyCredentialDescriptor>();
--    for (final WebAuthnUtils.WebAuthnPublicCredential cred : allowList) {
--      allowedList.add(
--          new PublicKeyCredentialDescriptor(
--              PublicKeyCredentialType.PUBLIC_KEY.toString(),
--              cred.id,
--              WebAuthnUtils.getTransportsForByte(cred.transports)));
--    }
-+      final GeckoBundle extensions,
-+      final byte[] clientDataHashBytes) {
-+    final String rpId = assertionBundle.getString("rpId", "");
-+    final String userVerification = assertionBundle.getString("userVerification", "");
-+    final boolean uvRequired = "required".equals(userVerification);
- 
--    final AuthenticationExtensions.Builder extBuilder = new AuthenticationExtensions.Builder();
-+    String appId = null;
-     if (extensions.containsKey("fidoAppId")) {
--      extBuilder.setFido2Extension(new FidoAppIdExtension(extensions.getString("fidoAppId")));
-+      appId = extensions.getString("fidoAppId");
-     }
--    final AuthenticationExtensions ext = extBuilder.build();
--
--    return new PublicKeyCredentialRequestOptions.Builder()
--        .setChallenge(challenge)
--        .setAllowList(allowedList)
--        .setTimeoutSeconds(assertionBundle.getLong("timeout") / 1000.0)
--        .setRpId(assertionBundle.getString("rpId"))
--        .setAuthenticationExtensions(ext)
--        .build();
--  }
- 
--  @UiThread
--  private static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertion(
--      final byte[] challenge,
--      final WebAuthnUtils.WebAuthnPublicCredential[] allowList,
--      final GeckoBundle assertionBundle,
--      final GeckoBundle extensions) {
--    ThreadUtils.assertOnUiThread();
--
--    if (!assertionBundle.containsKey("isWebAuthn")) {
--      // FIDO U2F not supported by Android (for us anyway) at this time
--      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
-+    final List<Ctap2Cbor.CredentialId> allowIds = new ArrayList<Ctap2Cbor.CredentialId>();
-+    for (final WebAuthnUtils.WebAuthnPublicCredential cred : allowList) {
-+      allowIds.add(new Ctap2Cbor.CredentialId(cred.id));
-     }
- 
--    final GeckoResult<WebAuthnUtils.GetAssertionResponse> result = new GeckoResult<>();
--    try {
--      final PublicKeyCredentialRequestOptions requestOptions =
--          getRequestOptionsForGetAssertion(challenge, allowList, assertionBundle, extensions);
--
--      final Uri origin = Uri.parse(assertionBundle.getString("origin"));
--      final BrowserPublicKeyCredentialRequestOptions browserOptions =
--          new BrowserPublicKeyCredentialRequestOptions.Builder()
--              .setPublicKeyCredentialRequestOptions(requestOptions)
--              .setOrigin(origin)
--              .build();
--
--      final Task<PendingIntent> intentTask;
--      // See the makeCredential method for documentation about the FIDO2 API and
--      // microG.
--      final Fido2PrivilegedApiClient fidoClient =
--          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
--
--      intentTask = fidoClient.getSignPendingIntent(browserOptions);
--
--      intentTask.addOnSuccessListener(
--          pendingIntent -> {
--            GeckoRuntime.getInstance()
--                .startActivityForResult(pendingIntent)
--                .accept(
--                    intent -> {
--                      if (!intent.hasExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA)) {
--                        Log.w(LOGTAG, "Failed to get credential data in FIDO intent");
--                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
--                        return;
--                      }
--
--                      final byte[] rspData =
--                          intent.getByteArrayExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA);
--                      final PublicKeyCredential publicKeyCredentialData =
--                          PublicKeyCredential.deserializeFromBytes(rspData);
--                      final AuthenticatorResponse response = publicKeyCredentialData.getResponse();
--
--                      final WebAuthnUtils.Exception error = parseErrorResponse(response);
--                      if (error != null) {
--                        result.completeExceptionally(error);
--                        return;
--                      }
--
--                      if (!(response instanceof AuthenticatorAssertionResponse)) {
--                        Log.w(LOGTAG, "Failed to get assertion response in FIDO intent");
--                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
--                        return;
--                      }
--
--                      final AuthenticatorAssertionResponse responseData =
--                          (AuthenticatorAssertionResponse) response;
--                      final WebAuthnUtils.GetAssertionResponse assertionResponse =
--                          new WebAuthnUtils.GetAssertionResponse.Builder()
--                              .setClientDataJson(responseData.getClientDataJSON())
--                              .setKeyHandle(publicKeyCredentialData.getRawId())
--                              .setAuthData(responseData.getAuthenticatorData())
--                              .setSignature(responseData.getSignature())
--                              .setUserHandle(responseData.getUserHandle())
--                              .setAuthenticatorAttachment(
--                                  publicKeyCredentialData.getAuthenticatorAttachment())
--                              .build();
--                      Log.d(LOGTAG, "GetAssertionResponse: " + assertionResponse.toString());
--                      result.complete(assertionResponse);
--                    },
--                    e -> {
--                      Log.w(LOGTAG, "Failed to get FIDO intent", e);
--                      result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
--                    });
--          });
--    } catch (final java.lang.Exception e) {
--      // We need to ensure we catch any possible exception here in order to ensure
--      // that the Promise on the content side is appropriately rejected. In particular,
--      // we will get `NoClassDefFoundError` if we're running on a device that does not
--      // have Google Play Services.
--      Log.w(LOGTAG, "Couldn't make credential", e);
--      return GeckoResult.fromException(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
-+    if (DEBUG) {
-+      Log.d(LOGTAG, "CTAP2 getAssertion rp=" + rpId + " allow=" + allowIds.size());
-     }
--    return result;
-+
-+    return WebAuthnCtap2.getAssertion(rpId, clientDataHashBytes, allowIds, appId, uvRequired);
-   }
- 
-   // ThreadConstraint false positive: runs in a GeckoResult continuation on the UI thread, which
-@@ -523,60 +234,66 @@
-         new WebAuthnUtils.WebAuthnPublicCredential[idList.length];
-     allowArrayList.toArray(allowList);
- 
--    // Unfortunately, we don't know where requested credential is stored.
-+    if (!assertionBundle.containsKey("isWebAuthn")) {
-+      // FIDO U2F not supported by Android (for us anyway) at this time
-+      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
-+    }
-+
-+    // Unlike upstream, there is no GMS-backed FIDO service to route through. The flow is:
-     //
--    // 1. Check whether play service has the credential that is included in allow list.
--    //    If found, use play service. If not, step 2.
--    // 2. Try credential manager to get credential.
--    //    If credential manager doesn't support passkeys, step 3.
--    // 3. Try play service to get credential.
-+    // 1. Credential Manager (Android 14+): if a passkey provider holds a matching credential,
-+    //    it answers.
-+    // 2. Otherwise the roaming security key answers directly via CTAP2 over USB/NFC, in
-+    //    process (no privileged FIDO service, no PendingIntent).
-     final GeckoResult<WebAuthnUtils.GetAssertionResponse> result = new GeckoResult<>();
- 
-     ThreadUtils.runOnUiThread(
-         () -> {
--          hasCredentialInGMS(assertionBundle.getString("rpId"), allowList)
-+          if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-+              || !hasCredentialManager()) {
-+            // No Credential Manager at all: security key directly.
-+            getAssertionWithCtap2(allowList, assertionBundle, extensions, clientDataHashBytes)
-+                .accept(
-+                    response -> result.complete(response),
-+                    e -> result.completeExceptionally(e));
-+            return;
-+          }
-+
-+          WebAuthnCredentialManager.prepareGetAssertion(
-+                  assertionBundle.getString("origin"), clientDataHashBytes, requestJSON)
-               .accept(
--                  found -> {
-+                  pendingHandle -> {
-                     ThreadUtils.runOnUiThread(
-                         () -> {
--                          if (found) {
--                            // Use GMS API due to having credential, or older Android
--                            getAssertion(challBytes, allowList, assertionBundle, extensions)
-+                          if (pendingHandle != null) {
-+                            WebAuthnCredentialManager.getAssertion(pendingHandle)
-                                 .accept(
-                                     response -> result.complete(response),
-                                     e -> result.completeExceptionally(e));
-                             return;
-                           }
--
--                          WebAuthnCredentialManager.prepareGetAssertion(
--                                  assertionBundle.getString("origin"),
--                                  clientDataHashBytes,
--                                  requestJSON)
-+                          // Credential Manager has no matching credential: security key.
-+                          getAssertionWithCtap2(
-+                                  allowList, assertionBundle, extensions, clientDataHashBytes)
-                               .accept(
--                                  pendingHandle -> {
--                                    ThreadUtils.runOnUiThread(
--                                        () -> {
--                                          if (pendingHandle != null) {
--                                            WebAuthnCredentialManager.getAssertion(pendingHandle)
--                                                .accept(
--                                                    response -> result.complete(response),
--                                                    e -> result.completeExceptionally(e));
--                                            return;
--                                          }
--                                          // Maybe credential manager has no credentials
--                                          getAssertion(
--                                                  challBytes,
--                                                  allowList,
--                                                  assertionBundle,
--                                                  extensions)
--                                              .accept(
--                                                  response -> result.complete(response),
--                                                  e -> result.completeExceptionally(e));
--                                        });
--                                  },
-+                                  response -> result.complete(response),
-                                   e -> result.completeExceptionally(e));
--                          return;
-                         });
-+                  },
-+                  e -> {
-+                    // Credential Manager unavailable: security key. (A user cancellation or a
-+                    // provider error surfaces as ABORT/UNKNOWN and must not fall through.)
-+                    if (e == null
-+                        || e.getMessage() == null
-+                        || !e.getMessage().equals("NOT_SUPPORTED_ERR")) {
-+                      result.completeExceptionally(e);
-+                      return;
-+                    }
-+                    getAssertionWithCtap2(
-+                            allowList, assertionBundle, extensions, clientDataHashBytes)
-+                        .accept(
-+                            response -> result.complete(response),
-+                            ex -> result.completeExceptionally(ex));
-                   });
-         });
-     return result;
-@@ -584,63 +301,19 @@
- 
-   @WrapForJNI(calledFrom = "gecko")
-   private static GeckoResult<Boolean> webAuthnIsUserVerifyingPlatformAuthenticatorAvailable() {
--    final Task<Boolean> task;
--    final Fido2PrivilegedApiClient fidoClient =
--        Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
--    task = fidoClient.isUserVerifyingPlatformAuthenticatorAvailable();
--
--    final GeckoResult<Boolean> res = new GeckoResult<>();
--    task.addOnSuccessListener(
--        isUVPAA -> {
--          res.complete(isUVPAA);
--        });
--    task.addOnFailureListener(
--        e -> {
--          Log.w(LOGTAG, "isUserVerifyingPlatformAuthenticatorAvailable is failed", e);
--          res.complete(false);
--        });
--    return res;
-+    // There is no platform (internal) authenticator: WebAuthn on this build is served by
-+    // Credential Manager passkeys and roaming security keys only.
-+    return GeckoResult.fromValue(Boolean.FALSE);
-   }
- 
--  private static GeckoResult<Boolean> hasCredentialInGMS(
--      final String rpId, final WebAuthnUtils.WebAuthnPublicCredential[] allowList) {
--    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
--      // Always use GMS on old Android
--      return GeckoResult.fromValue(true);
--    }
--    if (!BuildConfig.MOZILLA_OFFICIAL) {
--      // No way to check credential in GMS. Use Credential Manager at first.
--      return GeckoResult.fromValue(false);
--    }
--
--    final GeckoResult<Boolean> result = new GeckoResult<>();
-+  /** True when the Android Credential Manager service is present on this device. */
-+  private static boolean hasCredentialManager() {
-     try {
--      final Fido2PrivilegedApiClient fidoClient =
--          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
--      final Task<List<FidoCredentialDetails>> task = fidoClient.getCredentialList(rpId);
--      task.addOnSuccessListener(
--          credentials -> {
--            for (final FidoCredentialDetails credential : credentials) {
--              if (credential.getIsDiscoverable()) {
--                // All discoverable credentials have to be handled by credential manager
--                continue;
--              }
--
--              for (final WebAuthnUtils.WebAuthnPublicCredential item : allowList) {
--                if (Arrays.equals(credential.getCredentialId(), item.id)) {
--                  // Found credential in GMS.
--                  result.complete(true);
--                  return;
--                }
--              }
--            }
--            result.complete(false);
--          });
--      task.addOnFailureListener(e -> result.complete(false));
--    } catch (final java.lang.Exception e) {
--      // Play service may be nothing.
--      return GeckoResult.fromValue(false);
-+      return GeckoAppShell.getApplicationContext()
-+          .getPackageManager()
-+          .hasSystemFeature(PackageManager.FEATURE_CREDENTIALS);
-+    } catch (final RuntimeException e) {
-+      return false;
-     }
--    return result;
-   }
- }
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
-index d48fe66c43763d5f4bbdae292ac74bd875a98127..7b7b27309cbb566e2b9ec1ed70db33f72a05069c 100644
---- a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
-+++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
-@@ -7,7 +7,6 @@
- import android.util.Base64;
- import android.util.Log;
- import androidx.annotation.NonNull;
--import com.google.android.gms.fido.common.Transport;
- import java.nio.ByteBuffer;
- import java.util.ArrayList;
- import java.util.List;
-@@ -34,26 +33,6 @@
-     DIRECT,
-   }
- 
--  public static List<Transport> getTransportsForByte(final byte transports) {
--    final ArrayList<Transport> result = new ArrayList<Transport>();
--    if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
--      result.add(Transport.USB);
--    }
--    if ((transports & AUTHENTICATOR_TRANSPORT_NFC) == AUTHENTICATOR_TRANSPORT_NFC) {
--      result.add(Transport.NFC);
--    }
--    if ((transports & AUTHENTICATOR_TRANSPORT_BLE) == AUTHENTICATOR_TRANSPORT_BLE) {
--      result.add(Transport.BLUETOOTH_LOW_ENERGY);
--    }
--    if ((transports & AUTHENTICATOR_TRANSPORT_INTERNAL) == AUTHENTICATOR_TRANSPORT_INTERNAL) {
--      result.add(Transport.INTERNAL);
--    }
--    if ((transports & AUTHENTICATOR_TRANSPORT_HYBRID) == AUTHENTICATOR_TRANSPORT_HYBRID) {
--      result.add(Transport.HYBRID);
--    }
--    return result;
--  }
--
-   /* package */ static JSONArray getJSONTransportsForByte(final byte transports) {
-     final JSONArray json = new JSONArray();
-     if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
-diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
-index 85a42de77b1230084a2b26c7fd8f6115b9c03203..a4c9f5e319a7ad1a1d5ac7794e002e47059da681 100644
---- a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
-+++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
-@@ -6,7 +6,6 @@
- import static org.junit.Assert.assertEquals;
- import static org.junit.Assert.assertTrue;
- 
--import com.google.android.gms.fido.common.Transport;
- import java.util.Arrays;
- import java.util.List;
- import org.json.JSONArray;
-@@ -118,18 +117,6 @@
-   public void transportValue() throws Exception {
-     final byte transports = 31;
- 
--    final List<Transport> expectedFidoTransports =
--        Arrays.asList(
--            Transport.USB,
--            Transport.NFC,
--            Transport.BLUETOOTH_LOW_ENERGY,
--            Transport.INTERNAL,
--            Transport.HYBRID);
--    assertEquals(
--        "FIDO2's transport should be matched",
--        WebAuthnUtils.getTransportsForByte(transports),
--        expectedFidoTransports);
--
-     final String[] expectedJsonTransports =
-         new String[] {"usb", "nfc", "ble", "internal", "hybrid"};
-     final JSONArray array = WebAuthnUtils.getJSONTransportsForByte(transports);
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 new file mode 100644
+index 0000000000..e866b85327
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 @@ -0,0 +1,319 @@
@@ -1211,6 +388,7 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
 new file mode 100644
+index 0000000000..96950a017d
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
 @@ -0,0 +1,30 @@
@@ -1246,6 +424,7 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
 new file mode 100644
+index 0000000000..1b2763a616
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
 @@ -0,0 +1,40 @@
@@ -1291,6 +470,7 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
+index 0000000000..14e6a628df
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 @@ -0,0 +1,272 @@
@@ -1568,6 +748,7 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
+index 0000000000..9d778171e9
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 @@ -0,0 +1,570 @@
@@ -2143,6 +1324,7 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
+index 0000000000..264e67ac0e
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 @@ -0,0 +1,860 @@
@@ -3006,8 +2188,799 @@ new file mode 100644
 +    }
 +  }
 +}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
+index d48fe66c43..7b7b27309c 100644
+--- a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/util/WebAuthnUtils.java
+@@ -7,7 +7,6 @@ package org.mozilla.gecko.util;
+ import android.util.Base64;
+ import android.util.Log;
+ import androidx.annotation.NonNull;
+-import com.google.android.gms.fido.common.Transport;
+ import java.nio.ByteBuffer;
+ import java.util.ArrayList;
+ import java.util.List;
+@@ -34,26 +33,6 @@ public class WebAuthnUtils {
+     DIRECT,
+   }
+ 
+-  public static List<Transport> getTransportsForByte(final byte transports) {
+-    final ArrayList<Transport> result = new ArrayList<Transport>();
+-    if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
+-      result.add(Transport.USB);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_NFC) == AUTHENTICATOR_TRANSPORT_NFC) {
+-      result.add(Transport.NFC);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_BLE) == AUTHENTICATOR_TRANSPORT_BLE) {
+-      result.add(Transport.BLUETOOTH_LOW_ENERGY);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_INTERNAL) == AUTHENTICATOR_TRANSPORT_INTERNAL) {
+-      result.add(Transport.INTERNAL);
+-    }
+-    if ((transports & AUTHENTICATOR_TRANSPORT_HYBRID) == AUTHENTICATOR_TRANSPORT_HYBRID) {
+-      result.add(Transport.HYBRID);
+-    }
+-    return result;
+-  }
+-
+   /* package */ static JSONArray getJSONTransportsForByte(final byte transports) {
+     final JSONArray json = new JSONArray();
+     if ((transports & AUTHENTICATOR_TRANSPORT_USB) == AUTHENTICATOR_TRANSPORT_USB) {
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
+index efb17c0e3b..54872b2233 100644
+--- a/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java
+@@ -5,48 +5,18 @@
+ package org.mozilla.geckoview;
+ 
+ import android.annotation.SuppressLint;
+-import android.app.PendingIntent;
+-import android.net.Uri;
++import android.content.pm.PackageManager;
+ import android.os.Build;
+ import android.util.Log;
+ import androidx.annotation.UiThread;
+-import com.google.android.gms.fido.Fido;
+-import com.google.android.gms.fido.fido2.Fido2ApiClient;
+-import com.google.android.gms.fido.fido2.Fido2PrivilegedApiClient;
+-import com.google.android.gms.fido.fido2.api.common.Algorithm;
+-import com.google.android.gms.fido.fido2.api.common.Attachment;
+-import com.google.android.gms.fido.fido2.api.common.AttestationConveyancePreference;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensions;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensionsClientOutputs;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticationExtensionsCredPropsOutputs;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorAssertionResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorAttestationResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorErrorResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorResponse;
+-import com.google.android.gms.fido.fido2.api.common.AuthenticatorSelectionCriteria;
+-import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialCreationOptions;
+-import com.google.android.gms.fido.fido2.api.common.BrowserPublicKeyCredentialRequestOptions;
+-import com.google.android.gms.fido.fido2.api.common.EC2Algorithm;
+-import com.google.android.gms.fido.fido2.api.common.FidoAppIdExtension;
+-import com.google.android.gms.fido.fido2.api.common.FidoCredentialDetails;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredential;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialCreationOptions;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialDescriptor;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialParameters;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRequestOptions;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRpEntity;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialType;
+-import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialUserEntity;
+-import com.google.android.gms.fido.fido2.api.common.RSAAlgorithm;
+-import com.google.android.gms.fido.fido2.api.common.ResidentKeyRequirement;
+-import com.google.android.gms.tasks.Task;
+ import java.nio.ByteBuffer;
+ import java.util.ArrayList;
+-import java.util.Arrays;
+ import java.util.List;
+ import org.mozilla.gecko.GeckoAppShell;
+ import org.mozilla.gecko.WebAuthnCredentialManager;
+ import org.mozilla.gecko.annotation.WrapForJNI;
++import org.mozilla.gecko.ctap2.Ctap2Cbor;
++import org.mozilla.gecko.ctap2.WebAuthnCtap2;
+ import org.mozilla.gecko.util.GeckoBundle;
+ import org.mozilla.gecko.util.ThreadUtils;
+ import org.mozilla.gecko.util.WebAuthnUtils;
+@@ -55,243 +25,85 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+   private static final String LOGTAG = "WebAuthnTokenManager";
+   private static final boolean DEBUG = false;
+ 
+-  private static final Algorithm[] SUPPORTED_ALGORITHMS = {
+-    EC2Algorithm.ES256,
+-    EC2Algorithm.ES384,
+-    EC2Algorithm.ES512,
+-    EC2Algorithm.ED256, /* no ED384 */
+-    EC2Algorithm.ED512,
+-    RSAAlgorithm.PS256,
+-    RSAAlgorithm.PS384,
+-    RSAAlgorithm.PS512,
+-    RSAAlgorithm.RS256,
+-    RSAAlgorithm.RS384,
+-    RSAAlgorithm.RS512
+-  };
+-
+-  private static PublicKeyCredentialCreationOptions getRequestOptionsForMakeCredential(
++  // Fallback when the relying party sends no pubKeyCredParams: ES256 (CTAP2 defaults).
++  private static final int[] DEFAULT_COSE_ALGS = {-7};
++
++  @UiThread
++  private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredentialWithCtap2(
+       final GeckoBundle credentialBundle,
+       final byte[] userId,
+-      final byte[] challenge,
+       final WebAuthnUtils.WebAuthnPublicCredential[] excludeList,
+       final GeckoBundle authenticatorSelection,
+-      final GeckoBundle extensions) {
+-    final PublicKeyCredentialCreationOptions.Builder requestBuilder =
+-        new PublicKeyCredentialCreationOptions.Builder();
+-
+-    final List<PublicKeyCredentialParameters> params =
+-        new ArrayList<PublicKeyCredentialParameters>();
+-
+-    // WebAuthn supports more algorithms
+-    for (final Algorithm algo : SUPPORTED_ALGORITHMS) {
+-      params.add(
+-          new PublicKeyCredentialParameters(
+-              PublicKeyCredentialType.PUBLIC_KEY.toString(), algo.getAlgoValue()));
++      final GeckoBundle extensions,
++      final int[] algs,
++      final byte[] clientDataHashBytes) {
++    ThreadUtils.assertOnUiThread();
++
++    final GeckoBundle rpBundle = credentialBundle.getBundle("rp");
++    if (rpBundle == null) {
++      return GeckoResult.fromException(new WebAuthnUtils.Exception("DATA_ERR"));
+     }
++    final String rpId = rpBundle.getString("id", "");
++    final String rpName = rpBundle.getString("name", "");
+ 
++    String userName = "";
++    String userDisplayName = "";
+     final GeckoBundle userBundle = credentialBundle.getBundle("user");
+-    final PublicKeyCredentialUserEntity user =
+-        new PublicKeyCredentialUserEntity(
+-            userId,
+-            userBundle.getString("name", ""),
+-            /* deprecated userIcon field */ "",
+-            userBundle.getString("displayName", ""));
+-
+-    AttestationConveyancePreference pref = AttestationConveyancePreference.NONE;
+-    final String attestationPreference = credentialBundle.getString("attestation", "NONE");
+-    if (attestationPreference.equalsIgnoreCase(AttestationConveyancePreference.DIRECT.name())) {
+-      pref = AttestationConveyancePreference.DIRECT;
+-    } else if (attestationPreference.equalsIgnoreCase(
+-        AttestationConveyancePreference.INDIRECT.name())) {
+-      pref = AttestationConveyancePreference.INDIRECT;
++    if (userBundle != null) {
++      userName = userBundle.getString("name", "");
++      userDisplayName = userBundle.getString("displayName", "");
+     }
+ 
+-    final AuthenticatorSelectionCriteria.Builder selBuild =
+-        new AuthenticatorSelectionCriteria.Builder();
+-    final String authenticatorAttachment =
+-        authenticatorSelection.getString("authenticatorAttachment", "");
+-    if (authenticatorAttachment.equals("platform")) {
+-      selBuild.setAttachment(Attachment.PLATFORM);
+-    } else if (authenticatorAttachment.equals("cross-platform")) {
+-      selBuild.setAttachment(Attachment.CROSS_PLATFORM);
+-    }
+-    final String residentKey = authenticatorSelection.getString("residentKey", "");
+-    if (residentKey.equals("required")) {
+-      selBuild
+-          .setRequireResidentKey(true)
+-          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_REQUIRED);
+-    } else if (residentKey.equals("preferred")) {
+-      selBuild
+-          .setRequireResidentKey(false)
+-          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_PREFERRED);
+-    } else if (residentKey.equals("discouraged")) {
+-      selBuild
+-          .setRequireResidentKey(false)
+-          .setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_DISCOURAGED);
++    final List<Ctap2Cbor.PublicKeyCredParam> pubKeyCredParams =
++        new ArrayList<Ctap2Cbor.PublicKeyCredParam>();
++    if (algs != null) {
++      for (final int alg : algs) {
++        pubKeyCredParams.add(new Ctap2Cbor.PublicKeyCredParam(alg));
++      }
+     }
+-    final AuthenticatorSelectionCriteria sel = selBuild.build();
+-
+-    final AuthenticationExtensions.Builder extBuilder = new AuthenticationExtensions.Builder();
+-    if (extensions.containsKey("fidoAppId")) {
+-      extBuilder.setFido2Extension(new FidoAppIdExtension(extensions.getString("fidoAppId")));
++    if (pubKeyCredParams.isEmpty()) {
++      for (final int alg : DEFAULT_COSE_ALGS) {
++        pubKeyCredParams.add(new Ctap2Cbor.PublicKeyCredParam(alg));
++      }
+     }
+-    final AuthenticationExtensions ext = extBuilder.build();
+ 
+-    // userVerification are not yet consumed by Android's FIDO API
+-
+-    final List<PublicKeyCredentialDescriptor> excludedList =
+-        new ArrayList<PublicKeyCredentialDescriptor>();
++    final List<Ctap2Cbor.CredentialId> excludeIds = new ArrayList<Ctap2Cbor.CredentialId>();
+     for (final WebAuthnUtils.WebAuthnPublicCredential cred : excludeList) {
+-      excludedList.add(
+-          new PublicKeyCredentialDescriptor(
+-              PublicKeyCredentialType.PUBLIC_KEY.toString(),
+-              cred.id,
+-              WebAuthnUtils.getTransportsForByte(cred.transports)));
++      excludeIds.add(new Ctap2Cbor.CredentialId(cred.id));
+     }
+ 
+-    final GeckoBundle rpBundle = credentialBundle.getBundle("rp");
+-    final PublicKeyCredentialRpEntity rp =
+-        new PublicKeyCredentialRpEntity(
+-            rpBundle.getString("id"),
+-            rpBundle.getString("name", ""),
+-            /* deprecated rpIcon field */ "");
+-
+-    return requestBuilder
+-        .setUser(user)
+-        .setAttestationConveyancePreference(pref)
+-        .setAuthenticatorSelection(sel)
+-        .setAuthenticationExtensions(ext)
+-        .setChallenge(challenge)
+-        .setRp(rp)
+-        .setParameters(params)
+-        .setTimeoutSeconds(credentialBundle.getLong("timeout") / 1000.0)
+-        .setExcludeList(excludedList)
+-        .build();
+-  }
++    // "required" only: rk is an authenticator option a plain security key may reject as
++    // unsupported, so it is sent only when the relying party insists on a resident credential.
++    // (authSelBundle only carries "residentKey" when the RP asked credProps and the
++    // geckoview residentkey pref is on — see AndroidWebAuthnService::MakeCredential.)
++    final boolean hasResidentKeyOption = authenticatorSelection.containsKey("residentKey");
++    final String residentKey = authenticatorSelection.getString("residentKey", "");
++    final boolean residentKeyRequested = "required".equals(residentKey);
+ 
+-  @UiThread
+-  private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> makeCredential(
+-      final GeckoBundle credentialBundle,
+-      final byte[] userId,
+-      final byte[] challenge,
+-      final WebAuthnUtils.WebAuthnPublicCredential[] excludeList,
+-      final GeckoBundle authenticatorSelection,
+-      final GeckoBundle extensions) {
+-    ThreadUtils.assertOnUiThread();
++    // uv is likewise sent only when the relying party requires it; a roaming key without a
++    // local verification gesture fails an unrequested uv=true with CTAP2_ERR_UNSUPPORTED_OPTION.
++    final String userVerification = authenticatorSelection.getString("userVerification", "");
++    final boolean uvRequired = "required".equals(userVerification);
+ 
+-    if (!credentialBundle.containsKey("isWebAuthn")) {
+-      // FIDO U2F not supported by Android (for us anyway) at this time
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    if (DEBUG) {
++      Log.d(LOGTAG, "CTAP2 makeCredential rp=" + rpId + " algs=" + algs.length);
+     }
+ 
+-    final GeckoResult<WebAuthnUtils.MakeCredentialResponse> result = new GeckoResult<>();
+-    try {
+-      final PublicKeyCredentialCreationOptions requestOptions =
+-          getRequestOptionsForMakeCredential(
+-              credentialBundle, userId, challenge, excludeList, authenticatorSelection, extensions);
+-
+-      final Uri origin = Uri.parse(credentialBundle.getString("origin"));
+-
+-      final BrowserPublicKeyCredentialCreationOptions browserOptions =
+-          new BrowserPublicKeyCredentialCreationOptions.Builder()
+-              .setPublicKeyCredentialCreationOptions(requestOptions)
+-              .setOrigin(origin)
+-              .build();
+-
+-      final Task<PendingIntent> intentTask;
+-
+-      // The privileged FIDO2 API normally is restricted to apps with package
+-      // names and signatures that Google knows to be a browser. microG does not
+-      // have such a list, instead it asks the user to confirm that the app doing
+-      // the request is indeed a browser app (only for the first request from
+-      // that app).
+-      final Fido2PrivilegedApiClient fidoClient =
+-          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-      intentTask = fidoClient.getRegisterPendingIntent(browserOptions);
+-
+-      intentTask.addOnSuccessListener(
+-          pendingIntent -> {
+-            GeckoRuntime.getInstance()
+-                .startActivityForResult(pendingIntent)
+-                .accept(
+-                    intent -> {
+-                      if (!intent.hasExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA)) {
+-                        Log.w(LOGTAG, "Failed to get credential data in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-                      final byte[] rspData =
+-                          intent.getByteArrayExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA);
+-                      final PublicKeyCredential publicKeyCredentialData =
+-                          PublicKeyCredential.deserializeFromBytes(rspData);
+-
+-                      final AuthenticatorResponse response = publicKeyCredentialData.getResponse();
+-                      final WebAuthnUtils.Exception error = parseErrorResponse(response);
+-                      if (error != null) {
+-                        result.completeExceptionally(error);
+-                        return;
+-                      }
+-
+-                      if (!(response instanceof AuthenticatorAttestationResponse)) {
+-                        Log.w(LOGTAG, "Failed to get attestation response in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-
+-                      final WebAuthnUtils.MakeCredentialResponse.Builder builder =
+-                          new WebAuthnUtils.MakeCredentialResponse.Builder();
+-
+-                      // credProps is optional.
+-                      final AuthenticationExtensionsClientOutputs extensionsClientOutputsData =
+-                          publicKeyCredentialData.getClientExtensionResults();
+-                      if (extensionsClientOutputsData != null) {
+-                        final AuthenticationExtensionsCredPropsOutputs credPropsOutput =
+-                            extensionsClientOutputsData.getCredProps();
+-                        if (credPropsOutput != null) {
+-                          builder.setCredProps(credPropsOutput.getIsDiscoverableCredential());
+-                        }
+-                      }
+-
+-                      final AuthenticatorAttestationResponse responseData =
+-                          (AuthenticatorAttestationResponse) response;
+-                      final WebAuthnUtils.MakeCredentialResponse credentialResponse =
+-                          builder
+-                              .setKeyHandle(publicKeyCredentialData.getRawId())
+-                              .setAuthenticatorAttachment(
+-                                  publicKeyCredentialData.getAuthenticatorAttachment())
+-                              .setClientDataJson(responseData.getClientDataJSON())
+-                              .setAttestationObject(responseData.getAttestationObject())
+-                              .setTransports(responseData.getTransports())
+-                              .build();
+-
+-                      Log.d(LOGTAG, "MakeCredentialResponse: " + credentialResponse.toString());
+-                      result.complete(credentialResponse);
+-                    },
+-                    e -> {
+-                      Log.w(LOGTAG, "Failed to launch activity: ", e);
+-                      result.completeExceptionally(new WebAuthnUtils.Exception("ABORT_ERR"));
+-                    });
+-          });
+-
+-      intentTask.addOnFailureListener(
+-          e -> {
+-            Log.w(LOGTAG, "Failed to get FIDO intent", e);
+-            result.completeExceptionally(new WebAuthnUtils.Exception("ABORT_ERR"));
+-          });
+-    } catch (final java.lang.Exception e) {
+-      // We need to ensure we catch any possible exception here in order to ensure
+-      // that the Promise on the content side is appropriately rejected. In particular,
+-      // we will get `NoClassDefFoundError` if we're running on a device that does not
+-      // have Google Play Services.
+-      Log.w(LOGTAG, "Couldn't make credential", e);
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-    }
+-    return result;
++    return WebAuthnCtap2.makeCredential(
++        rpId,
++        rpName,
++        userId,
++        userName,
++        userDisplayName,
++        clientDataHashBytes,
++        pubKeyCredParams,
++        excludeIds,
++        residentKeyRequested,
++        uvRequired,
++        hasResidentKeyOption);
+   }
+ 
+-  // ThreadConstraint false positive: runs in a GeckoResult continuation on the UI thread, which
+-  // lint cannot model.
+-  @SuppressLint("ThreadConstraint")
++  @SuppressLint("WrongThread")
+   @WrapForJNI(calledFrom = "gecko")
+   private static GeckoResult<WebAuthnUtils.MakeCredentialResponse> webAuthnMakeCredential(
+       final GeckoBundle credentialBundle,
+@@ -325,173 +137,72 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+         new WebAuthnUtils.WebAuthnPublicCredential[idList.length];
+     excludeArrayList.toArray(excludeList);
+ 
++    if (!credentialBundle.containsKey("isWebAuthn")) {
++      // FIDO U2F not supported by Android (for us anyway) at this time
++      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    }
++
+     final GeckoResult<WebAuthnUtils.MakeCredentialResponse> result = new GeckoResult<>();
+ 
+     ThreadUtils.runOnUiThread(
+         () -> {
++          // Credential Manager first: it owns passkeys when a provider is installed.
++          // Without a provider (e.g. a GMS-free OS) it fails NOT_SUPPORTED_ERR and the
++          // roaming security key (CTAP2 over USB/NFC, no external FIDO service) answers.
+           WebAuthnCredentialManager.makeCredential(
+                   credentialBundle.getString("origin"), clientDataHashBytes, requestJSON)
+               .accept(
+                   response -> result.complete(response),
+                   exceptionInCredManager -> {
+-                    if (!exceptionInCredManager.getMessage().equals("NOT_SUPPORTED_ERR")) {
++                    if (exceptionInCredManager == null
++                        || exceptionInCredManager.getMessage() == null
++                        || !exceptionInCredManager
++                            .getMessage()
++                            .equals("NOT_SUPPORTED_ERR")) {
+                       result.completeExceptionally(exceptionInCredManager);
+                       return;
+                     }
+-                    ThreadUtils.runOnUiThread(
+-                        () -> {
+-                          // If supported error, we try to use GMS FIDO2.
+-                          makeCredential(
+-                                  credentialBundle,
+-                                  userBytes,
+-                                  challBytes,
+-                                  excludeList,
+-                                  authenticatorSelection,
+-                                  extensions)
+-                              .accept(
+-                                  response -> result.complete(response),
+-                                  exceptionInGMS -> result.completeExceptionally(exceptionInGMS));
+-                        });
++                    makeCredentialWithCtap2(
++                            credentialBundle,
++                            userBytes,
++                            excludeList,
++                            authenticatorSelection,
++                            extensions,
++                            algs,
++                            clientDataHashBytes)
++                        .accept(
++                            response -> result.complete(response),
++                            exceptionInCtap2 ->
++                                result.completeExceptionally(exceptionInCtap2));
+                   });
+         });
+     return result;
+   }
+ 
+-  private static WebAuthnUtils.Exception parseErrorResponse(final AuthenticatorResponse response) {
+-    if (!(response instanceof AuthenticatorErrorResponse)) {
+-      return null;
+-    }
+-
+-    final AuthenticatorErrorResponse responseData = (AuthenticatorErrorResponse) response;
+-
+-    Log.e(LOGTAG, "errorCode.name: " + responseData.getErrorCode());
+-    Log.e(LOGTAG, "errorMessage: " + responseData.getErrorMessage());
+-
+-    return new WebAuthnUtils.Exception(responseData.getErrorCode().name());
+-  }
+-
+-  private static PublicKeyCredentialRequestOptions getRequestOptionsForGetAssertion(
+-      final byte[] challenge,
++  private static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertionWithCtap2(
+       final WebAuthnUtils.WebAuthnPublicCredential[] allowList,
+       final GeckoBundle assertionBundle,
+-      final GeckoBundle extensions) {
+-    final List<PublicKeyCredentialDescriptor> allowedList =
+-        new ArrayList<PublicKeyCredentialDescriptor>();
+-    for (final WebAuthnUtils.WebAuthnPublicCredential cred : allowList) {
+-      allowedList.add(
+-          new PublicKeyCredentialDescriptor(
+-              PublicKeyCredentialType.PUBLIC_KEY.toString(),
+-              cred.id,
+-              WebAuthnUtils.getTransportsForByte(cred.transports)));
+-    }
++      final GeckoBundle extensions,
++      final byte[] clientDataHashBytes) {
++    final String rpId = assertionBundle.getString("rpId", "");
++    final String userVerification = assertionBundle.getString("userVerification", "");
++    final boolean uvRequired = "required".equals(userVerification);
+ 
+-    final AuthenticationExtensions.Builder extBuilder = new AuthenticationExtensions.Builder();
++    String appId = null;
+     if (extensions.containsKey("fidoAppId")) {
+-      extBuilder.setFido2Extension(new FidoAppIdExtension(extensions.getString("fidoAppId")));
++      appId = extensions.getString("fidoAppId");
+     }
+-    final AuthenticationExtensions ext = extBuilder.build();
+-
+-    return new PublicKeyCredentialRequestOptions.Builder()
+-        .setChallenge(challenge)
+-        .setAllowList(allowedList)
+-        .setTimeoutSeconds(assertionBundle.getLong("timeout") / 1000.0)
+-        .setRpId(assertionBundle.getString("rpId"))
+-        .setAuthenticationExtensions(ext)
+-        .build();
+-  }
+-
+-  @UiThread
+-  private static GeckoResult<WebAuthnUtils.GetAssertionResponse> getAssertion(
+-      final byte[] challenge,
+-      final WebAuthnUtils.WebAuthnPublicCredential[] allowList,
+-      final GeckoBundle assertionBundle,
+-      final GeckoBundle extensions) {
+-    ThreadUtils.assertOnUiThread();
+ 
+-    if (!assertionBundle.containsKey("isWebAuthn")) {
+-      // FIDO U2F not supported by Android (for us anyway) at this time
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    final List<Ctap2Cbor.CredentialId> allowIds = new ArrayList<Ctap2Cbor.CredentialId>();
++    for (final WebAuthnUtils.WebAuthnPublicCredential cred : allowList) {
++      allowIds.add(new Ctap2Cbor.CredentialId(cred.id));
+     }
+ 
+-    final GeckoResult<WebAuthnUtils.GetAssertionResponse> result = new GeckoResult<>();
+-    try {
+-      final PublicKeyCredentialRequestOptions requestOptions =
+-          getRequestOptionsForGetAssertion(challenge, allowList, assertionBundle, extensions);
+-
+-      final Uri origin = Uri.parse(assertionBundle.getString("origin"));
+-      final BrowserPublicKeyCredentialRequestOptions browserOptions =
+-          new BrowserPublicKeyCredentialRequestOptions.Builder()
+-              .setPublicKeyCredentialRequestOptions(requestOptions)
+-              .setOrigin(origin)
+-              .build();
+-
+-      final Task<PendingIntent> intentTask;
+-      // See the makeCredential method for documentation about the FIDO2 API and
+-      // microG.
+-      final Fido2PrivilegedApiClient fidoClient =
+-          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-
+-      intentTask = fidoClient.getSignPendingIntent(browserOptions);
+-
+-      intentTask.addOnSuccessListener(
+-          pendingIntent -> {
+-            GeckoRuntime.getInstance()
+-                .startActivityForResult(pendingIntent)
+-                .accept(
+-                    intent -> {
+-                      if (!intent.hasExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA)) {
+-                        Log.w(LOGTAG, "Failed to get credential data in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-
+-                      final byte[] rspData =
+-                          intent.getByteArrayExtra(Fido.FIDO2_KEY_CREDENTIAL_EXTRA);
+-                      final PublicKeyCredential publicKeyCredentialData =
+-                          PublicKeyCredential.deserializeFromBytes(rspData);
+-                      final AuthenticatorResponse response = publicKeyCredentialData.getResponse();
+-
+-                      final WebAuthnUtils.Exception error = parseErrorResponse(response);
+-                      if (error != null) {
+-                        result.completeExceptionally(error);
+-                        return;
+-                      }
+-
+-                      if (!(response instanceof AuthenticatorAssertionResponse)) {
+-                        Log.w(LOGTAG, "Failed to get assertion response in FIDO intent");
+-                        result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                        return;
+-                      }
+-
+-                      final AuthenticatorAssertionResponse responseData =
+-                          (AuthenticatorAssertionResponse) response;
+-                      final WebAuthnUtils.GetAssertionResponse assertionResponse =
+-                          new WebAuthnUtils.GetAssertionResponse.Builder()
+-                              .setClientDataJson(responseData.getClientDataJSON())
+-                              .setKeyHandle(publicKeyCredentialData.getRawId())
+-                              .setAuthData(responseData.getAuthenticatorData())
+-                              .setSignature(responseData.getSignature())
+-                              .setUserHandle(responseData.getUserHandle())
+-                              .setAuthenticatorAttachment(
+-                                  publicKeyCredentialData.getAuthenticatorAttachment())
+-                              .build();
+-                      Log.d(LOGTAG, "GetAssertionResponse: " + assertionResponse.toString());
+-                      result.complete(assertionResponse);
+-                    },
+-                    e -> {
+-                      Log.w(LOGTAG, "Failed to get FIDO intent", e);
+-                      result.completeExceptionally(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
+-                    });
+-          });
+-    } catch (final java.lang.Exception e) {
+-      // We need to ensure we catch any possible exception here in order to ensure
+-      // that the Promise on the content side is appropriately rejected. In particular,
+-      // we will get `NoClassDefFoundError` if we're running on a device that does not
+-      // have Google Play Services.
+-      Log.w(LOGTAG, "Couldn't make credential", e);
+-      return GeckoResult.fromException(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++    if (DEBUG) {
++      Log.d(LOGTAG, "CTAP2 getAssertion rp=" + rpId + " allow=" + allowIds.size());
+     }
+-    return result;
++
++    return WebAuthnCtap2.getAssertion(rpId, clientDataHashBytes, allowIds, appId, uvRequired);
+   }
+ 
+   // ThreadConstraint false positive: runs in a GeckoResult continuation on the UI thread, which
+@@ -523,60 +234,66 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+         new WebAuthnUtils.WebAuthnPublicCredential[idList.length];
+     allowArrayList.toArray(allowList);
+ 
+-    // Unfortunately, we don't know where requested credential is stored.
++    if (!assertionBundle.containsKey("isWebAuthn")) {
++      // FIDO U2F not supported by Android (for us anyway) at this time
++      return GeckoResult.fromException(new WebAuthnUtils.Exception("NOT_SUPPORTED_ERR"));
++    }
++
++    // Unlike upstream, there is no GMS-backed FIDO service to route through. The flow is:
+     //
+-    // 1. Check whether play service has the credential that is included in allow list.
+-    //    If found, use play service. If not, step 2.
+-    // 2. Try credential manager to get credential.
+-    //    If credential manager doesn't support passkeys, step 3.
+-    // 3. Try play service to get credential.
++    // 1. Credential Manager (Android 14+): if a passkey provider holds a matching credential,
++    //    it answers.
++    // 2. Otherwise the roaming security key answers directly via CTAP2 over USB/NFC, in
++    //    process (no privileged FIDO service, no PendingIntent).
+     final GeckoResult<WebAuthnUtils.GetAssertionResponse> result = new GeckoResult<>();
+ 
+     ThreadUtils.runOnUiThread(
+         () -> {
+-          hasCredentialInGMS(assertionBundle.getString("rpId"), allowList)
++          if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE
++              || !hasCredentialManager()) {
++            // No Credential Manager at all: security key directly.
++            getAssertionWithCtap2(allowList, assertionBundle, extensions, clientDataHashBytes)
++                .accept(
++                    response -> result.complete(response),
++                    e -> result.completeExceptionally(e));
++            return;
++          }
++
++          WebAuthnCredentialManager.prepareGetAssertion(
++                  assertionBundle.getString("origin"), clientDataHashBytes, requestJSON)
+               .accept(
+-                  found -> {
++                  pendingHandle -> {
+                     ThreadUtils.runOnUiThread(
+                         () -> {
+-                          if (found) {
+-                            // Use GMS API due to having credential, or older Android
+-                            getAssertion(challBytes, allowList, assertionBundle, extensions)
++                          if (pendingHandle != null) {
++                            WebAuthnCredentialManager.getAssertion(pendingHandle)
+                                 .accept(
+                                     response -> result.complete(response),
+                                     e -> result.completeExceptionally(e));
+                             return;
+                           }
+-
+-                          WebAuthnCredentialManager.prepareGetAssertion(
+-                                  assertionBundle.getString("origin"),
+-                                  clientDataHashBytes,
+-                                  requestJSON)
++                          // Credential Manager has no matching credential: security key.
++                          getAssertionWithCtap2(
++                                  allowList, assertionBundle, extensions, clientDataHashBytes)
+                               .accept(
+-                                  pendingHandle -> {
+-                                    ThreadUtils.runOnUiThread(
+-                                        () -> {
+-                                          if (pendingHandle != null) {
+-                                            WebAuthnCredentialManager.getAssertion(pendingHandle)
+-                                                .accept(
+-                                                    response -> result.complete(response),
+-                                                    e -> result.completeExceptionally(e));
+-                                            return;
+-                                          }
+-                                          // Maybe credential manager has no credentials
+-                                          getAssertion(
+-                                                  challBytes,
+-                                                  allowList,
+-                                                  assertionBundle,
+-                                                  extensions)
+-                                              .accept(
+-                                                  response -> result.complete(response),
+-                                                  e -> result.completeExceptionally(e));
+-                                        });
+-                                  },
++                                  response -> result.complete(response),
+                                   e -> result.completeExceptionally(e));
+-                          return;
+                         });
++                  },
++                  e -> {
++                    // Credential Manager unavailable: security key. (A user cancellation or a
++                    // provider error surfaces as ABORT/UNKNOWN and must not fall through.)
++                    if (e == null
++                        || e.getMessage() == null
++                        || !e.getMessage().equals("NOT_SUPPORTED_ERR")) {
++                      result.completeExceptionally(e);
++                      return;
++                    }
++                    getAssertionWithCtap2(
++                            allowList, assertionBundle, extensions, clientDataHashBytes)
++                        .accept(
++                            response -> result.complete(response),
++                            ex -> result.completeExceptionally(ex));
+                   });
+         });
+     return result;
+@@ -584,63 +301,19 @@ import org.mozilla.gecko.util.WebAuthnUtils;
+ 
+   @WrapForJNI(calledFrom = "gecko")
+   private static GeckoResult<Boolean> webAuthnIsUserVerifyingPlatformAuthenticatorAvailable() {
+-    final Task<Boolean> task;
+-    final Fido2PrivilegedApiClient fidoClient =
+-        Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-    task = fidoClient.isUserVerifyingPlatformAuthenticatorAvailable();
+-
+-    final GeckoResult<Boolean> res = new GeckoResult<>();
+-    task.addOnSuccessListener(
+-        isUVPAA -> {
+-          res.complete(isUVPAA);
+-        });
+-    task.addOnFailureListener(
+-        e -> {
+-          Log.w(LOGTAG, "isUserVerifyingPlatformAuthenticatorAvailable is failed", e);
+-          res.complete(false);
+-        });
+-    return res;
++    // There is no platform (internal) authenticator: WebAuthn on this build is served by
++    // Credential Manager passkeys and roaming security keys only.
++    return GeckoResult.fromValue(Boolean.FALSE);
+   }
+ 
+-  private static GeckoResult<Boolean> hasCredentialInGMS(
+-      final String rpId, final WebAuthnUtils.WebAuthnPublicCredential[] allowList) {
+-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+-      // Always use GMS on old Android
+-      return GeckoResult.fromValue(true);
+-    }
+-    if (!BuildConfig.MOZILLA_OFFICIAL) {
+-      // No way to check credential in GMS. Use Credential Manager at first.
+-      return GeckoResult.fromValue(false);
+-    }
+-
+-    final GeckoResult<Boolean> result = new GeckoResult<>();
++  /** True when the Android Credential Manager service is present on this device. */
++  private static boolean hasCredentialManager() {
+     try {
+-      final Fido2PrivilegedApiClient fidoClient =
+-          Fido.getFido2PrivilegedApiClient(GeckoAppShell.getApplicationContext());
+-      final Task<List<FidoCredentialDetails>> task = fidoClient.getCredentialList(rpId);
+-      task.addOnSuccessListener(
+-          credentials -> {
+-            for (final FidoCredentialDetails credential : credentials) {
+-              if (credential.getIsDiscoverable()) {
+-                // All discoverable credentials have to be handled by credential manager
+-                continue;
+-              }
+-
+-              for (final WebAuthnUtils.WebAuthnPublicCredential item : allowList) {
+-                if (Arrays.equals(credential.getCredentialId(), item.id)) {
+-                  // Found credential in GMS.
+-                  result.complete(true);
+-                  return;
+-                }
+-              }
+-            }
+-            result.complete(false);
+-          });
+-      task.addOnFailureListener(e -> result.complete(false));
+-    } catch (final java.lang.Exception e) {
+-      // Play service may be nothing.
+-      return GeckoResult.fromValue(false);
++      return GeckoAppShell.getApplicationContext()
++          .getPackageManager()
++          .hasSystemFeature(PackageManager.FEATURE_CREDENTIALS);
++    } catch (final RuntimeException e) {
++      return false;
+     }
+-    return result;
+   }
+ }
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
 new file mode 100644
+index 0000000000..1c5bb53dbe
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
 @@ -0,0 +1,238 @@
@@ -3251,6 +3224,7 @@ new file mode 100644
 +}
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2RankingTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2RankingTest.java
 new file mode 100644
+index 0000000000..43526a16f3
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2RankingTest.java
 @@ -0,0 +1,124 @@
@@ -3378,3 +3352,34 @@ new file mode 100644
 +                info(CLASS_HID, PROTO_KEYBOARD, false, false, 64))));
 +  }
 +}
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
+index 85a42de77b..a4c9f5e319 100644
+--- a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
+@@ -6,7 +6,6 @@ package org.mozilla.gecko.util;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+ 
+-import com.google.android.gms.fido.common.Transport;
+ import java.util.Arrays;
+ import java.util.List;
+ import org.json.JSONArray;
+@@ -118,18 +117,6 @@ public class WebAuthnUtilsTest {
+   public void transportValue() throws Exception {
+     final byte transports = 31;
+ 
+-    final List<Transport> expectedFidoTransports =
+-        Arrays.asList(
+-            Transport.USB,
+-            Transport.NFC,
+-            Transport.BLUETOOTH_LOW_ENERGY,
+-            Transport.INTERNAL,
+-            Transport.HYBRID);
+-    assertEquals(
+-        "FIDO2's transport should be matched",
+-        WebAuthnUtils.getTransportsForByte(transports),
+-        expectedFidoTransports);
+-
+     final String[] expectedJsonTransports =
+         new String[] {"usb", "nfc", "ble", "internal", "hybrid"};
+     final JSONArray array = WebAuthnUtils.getJSONTransportsForByte(transports);

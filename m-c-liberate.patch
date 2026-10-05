@@ -1,5 +1,5 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 75abbfbdbcea..a4a67c769ce3 100644
+index 4ef9dc15fd..2fce57b3c0 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
 @@ -55,17 +55,10 @@ work = "2.11.2"
@@ -15,19 +15,19 @@ index 75abbfbdbcea..a4a67c769ce3 100644
 -play-integrity = "1.6.0"
 -play-review = "2.0.2"
 -play-services-ads-id = "18.3.0"
--play-services-base = "18.10.0"
--play-services-fido = "21.3.0"
- protobuf = "4.35.1"
+-play-services-base = "18.10.1"
+-play-services-fido = "21.3.1"
+ protobuf = "4.36.1"
  
  # Gradle plugins
 @@ -113,6 +106,7 @@ jna = "5.19.1"
- json = "20260719"
- jsoup = "1.23.1"
+ json = "20260814"
+ jsoup = "1.23.2"
  lottie = "6.7.1"
 +microg = "0.3.16.252432"
- okhttp = "5.4.0"
- okio = "3.18.1"
- sentry = "8.52.0"
+ okhttp = "5.5.0"
+ okio = "3.18.2"
+ sentry = "8.55.0"
 @@ -130,7 +124,6 @@ kotlin-serialization = { module = "org.jetbrains.kotlin.plugin.serialization:org
  kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
  kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
@@ -36,7 +36,7 @@ index 75abbfbdbcea..a4a67c769ce3 100644
  kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
  kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
  
-@@ -228,21 +221,15 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
+@@ -230,21 +223,15 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
  
  # Google other
  accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }

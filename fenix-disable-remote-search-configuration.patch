@@ -1,29 +1,13 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-index bcf30637b845..49245dd641a3 100644
+index b0975f46b4..5485655fa5 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-@@ -325,7 +325,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
+@@ -314,7 +314,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
          }
  
          requirePreference<SwitchPreferenceCompat>(R.string.pref_key_use_remote_search_configuration).apply {
 -            isVisible = true
 +            isVisible = false
              isChecked = settings.useRemoteSearchConfiguration
-             onPreferenceChangeListener = object : SharedPreferenceUpdater() {
-                 override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 6fb557f631f1..e0e2ef89a764 100644
---- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-@@ -2291,10 +2291,7 @@ class Settings(
-     /**
-      * Indicates whether or not to use remote server search configuration.
-      */
--    var useRemoteSearchConfiguration by booleanPreference(
--        key = appContext.getPreferenceKey(R.string.pref_key_use_remote_search_configuration),
--        default = { FxNimbus.features.remoteSearchConfiguration.value().enabled },
--    )
-+    var useRemoteSearchConfiguration = false
- 
-     /**
-      * Indicates if the menu CFR should be displayed to the user.
+             onPreferenceChangeListener =
+                 object : SharedPreferenceUpdater() {

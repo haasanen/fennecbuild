@@ -1,5 +1,5 @@
 diff --git a/config/makefiles/rust.mk b/config/makefiles/rust.mk
-index b9526fb059..fdbf8dc35b 100644
+index 0a7413d3ee..97c4650974 100644
 --- a/config/makefiles/rust.mk
 +++ b/config/makefiles/rust.mk
 @@ -85,19 +85,10 @@ ifndef DEVELOPER_OPTIONS
@@ -26,7 +26,7 @@ index b9526fb059..fdbf8dc35b 100644
  endif
  endif
  
-@@ -324,7 +315,9 @@ $(HOST_RECIPES): RUSTFLAGS:=$(rustflags_override)
+@@ -332,7 +323,9 @@ $(HOST_RECIPES): RUSTFLAGS:=$(rustflags_override)
  # crate. This results in better optimization and less code duplication at the
  # cost of longer compile times.
  ifndef DEVELOPER_OPTIONS

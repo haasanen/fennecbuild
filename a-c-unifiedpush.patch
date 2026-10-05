@@ -1,0 +1,301 @@
+diff --git a/mobile/android/android-components/components/concept/push/src/main/java/mozilla/components/concept/push/PushProcessor.kt b/mobile/android/android-components/components/concept/push/src/main/java/mozilla/components/concept/push/PushProcessor.kt
+index 938335d08d..f43d59425b 100644
+--- a/mobile/android/android-components/components/concept/push/src/main/java/mozilla/components/concept/push/PushProcessor.kt
++++ b/mobile/android/android-components/components/concept/push/src/main/java/mozilla/components/concept/push/PushProcessor.kt
+@@ -13,10 +13,10 @@ import androidx.annotation.VisibleForTesting
+ interface PushProcessor {
+ 
+     /** Start the push processor and any service associated. */
+-    fun initialize()
++//    fun initialize()
+ 
+     /** Removes all push subscriptions from the device. */
+-    fun shutdown()
++//    fun shutdown()
+ 
+     /** A new registration token has been received. */
+     fun onNewToken(newToken: String)
+@@ -31,7 +31,7 @@ interface PushProcessor {
+     fun onError(error: PushError)
+ 
+     /** Requests the [PushService] to renew it's registration with it's provider. */
+-    fun renewRegistration()
++//    fun renewRegistration()
+ 
+     companion object {
+         /**
+diff --git a/mobile/android/android-components/components/feature/accounts-push/build.gradle b/mobile/android/android-components/components/feature/accounts-push/build.gradle
+index dedf86c7f6..2ad2de009d 100644
+--- a/mobile/android/android-components/components/feature/accounts-push/build.gradle
++++ b/mobile/android/android-components/components/feature/accounts-push/build.gradle
+@@ -12,6 +12,7 @@ android {
+ }
+ 
+ dependencies {
++    implementation 'org.ironfoxoss.unifiedpush:unifiedpush:0.0.1-+'
+     implementation project(':components:browser-state')
+     implementation project(':components:concept-push')
+     implementation project(':components:feature-push')
+diff --git a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/FxaPushSupportFeature.kt b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/FxaPushSupportFeature.kt
+index 5381243b4c..a54848f158 100644
+--- a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/FxaPushSupportFeature.kt
++++ b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/FxaPushSupportFeature.kt
+@@ -26,9 +26,11 @@ import mozilla.components.concept.sync.DevicePushSubscription
+ import mozilla.components.concept.sync.OAuthAccount
+ import mozilla.components.feature.accounts.push.VerificationDelegate.Companion.PERIODIC_INTERVAL_MILLISECONDS
+ import mozilla.components.feature.accounts.push.cache.PushScopeProperty
+-import mozilla.components.feature.push.AutoPushFeature
+-import mozilla.components.feature.push.AutoPushSubscription
+-import mozilla.components.feature.push.PushScope
++import org.ironfoxoss.unifiedpush.AutoPushSubscription
++import org.ironfoxoss.unifiedpush.PushObserver
++import org.ironfoxoss.unifiedpush.PushScope
++import org.ironfoxoss.unifiedpush.PushSubscriptionProcessor
++import org.ironfoxoss.unifiedpush.Pusher
+ import mozilla.components.service.fxa.manager.FxaAccountManager
+ import mozilla.components.service.fxa.manager.ext.withConstellationIfExists
+ import mozilla.components.support.base.log.logger.Logger
+@@ -59,7 +61,7 @@ internal const val PREF_FXA_SCOPE = "fxa_push_scope"
+ class FxaPushSupportFeature(
+     private val context: Context,
+     private val accountManager: FxaAccountManager,
+-    private val pushFeature: AutoPushFeature,
++    private val pushFeature: Pusher,
+     private val applicationScope: CoroutineScope,
+     private val crashReporter: CrashReporting? = null,
+     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+@@ -120,7 +122,7 @@ class FxaPushSupportFeature(
+  */
+ internal class AccountObserver(
+     private val context: Context,
+-    private val push: AutoPushFeature,
++    private val push: Pusher,
+     private val fxaPushScope: String,
+     private val crashReporter: CrashReporting?,
+     private val lifecycleOwner: LifecycleOwner,
+@@ -129,7 +131,7 @@ internal class AccountObserver(
+ ) : SyncAccountObserver {
+ 
+     private val logger = Logger(AccountObserver::class.java.simpleName)
+-    private val verificationDelegate = VerificationDelegate(context, push.config.disableRateLimit)
++    private val verificationDelegate = VerificationDelegate(context, push.disableRateLimit)
+ 
+     override fun onAuthenticated(account: OAuthAccount, authType: AuthType) {
+         val constellationObserver =
+@@ -168,7 +170,7 @@ internal class AccountObserver(
+  * already exists, then this doesn't hit any servers, so it's OK to call this somewhat frequently.
+  */
+ internal fun pushSubscribe(
+-    push: AutoPushFeature,
++    push: PushSubscriptionProcessor,
+     account: OAuthAccount,
+     scope: String,
+     crashReporter: CrashReporting?,
+@@ -210,7 +212,7 @@ internal fun pushSubscribe(
+  */
+ internal class ConstellationObserver(
+     context: Context,
+-    private val push: AutoPushFeature,
++    private val push: PushSubscriptionProcessor,
+     private val scope: String,
+     private val account: OAuthAccount,
+     private val verifier: VerificationDelegate = VerificationDelegate(context),
+@@ -253,10 +255,10 @@ internal class ConstellationObserver(
+ /** An [AutoPushFeature] observer to handle [FxaAccountManager] subscriptions and push events. */
+ internal class AutoPushObserver(
+     private val accountManager: FxaAccountManager,
+-    private val pushFeature: AutoPushFeature,
++    private val pushFeature: PushSubscriptionProcessor,
+     private val fxaPushScope: String,
+     private val applicationScope: CoroutineScope,
+-) : AutoPushFeature.Observer {
++) : PushObserver {
+     private val logger = Logger(AutoPushObserver::class.java.simpleName)
+ 
+     override fun onMessageReceived(scope: String, message: ByteArray?) {
+diff --git a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
+index f0daa1c910..eeb992cd56 100644
+--- a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
++++ b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
+@@ -13,7 +13,8 @@ import kotlinx.coroutines.withContext
+ import mozilla.components.feature.accounts.push.FxaPushSupportFeature
+ import mozilla.components.feature.accounts.push.PREF_FXA_SCOPE
+ import mozilla.components.feature.accounts.push.preference
+-import mozilla.components.feature.push.PushScope
++import org.ironfoxoss.unifiedpush.PushScope
++import java.util.UUID
+ 
+ /** An implementation of a [ScopeProperty] that generates and stores a scope in [SharedPreferences]. */
+ internal class PushScopeProperty(
+diff --git a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/ScopeProperty.kt b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/ScopeProperty.kt
+index 2c24e6eb6e..f45b78f44e 100644
+--- a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/ScopeProperty.kt
++++ b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/ScopeProperty.kt
+@@ -4,7 +4,7 @@
+ 
+ package mozilla.components.feature.accounts.push.cache
+ 
+-import mozilla.components.feature.push.PushScope
++import org.ironfoxoss.unifiedpush.PushScope
+ 
+ /** A [ScopeProperty] implementation generates and holds the [PushScope]. */
+ interface ScopeProperty {
+diff --git a/mobile/android/android-components/components/feature/push/src/main/java/mozilla/components/feature/push/AutoPushFeature.kt b/mobile/android/android-components/components/feature/push/src/main/java/mozilla/components/feature/push/AutoPushFeature.kt
+index a79dc8a4ca..1da88946a2 100644
+--- a/mobile/android/android-components/components/feature/push/src/main/java/mozilla/components/feature/push/AutoPushFeature.kt
++++ b/mobile/android/android-components/components/feature/push/src/main/java/mozilla/components/feature/push/AutoPushFeature.kt
+@@ -30,13 +30,14 @@ import mozilla.components.concept.push.PushError
+ import mozilla.components.concept.push.PushProcessor
+ import mozilla.components.concept.push.PushService
+ import mozilla.components.support.base.log.logger.Logger
+-import mozilla.components.support.base.observer.Observable
+-import mozilla.components.support.base.observer.ObserverRegistry
++import org.ironfoxoss.unifiedpush.AppServerKey
++import org.ironfoxoss.unifiedpush.AutoPushSubscription
++import org.ironfoxoss.unifiedpush.PushScope
++import org.ironfoxoss.unifiedpush.Pusher
+ import mozilla.components.support.base.utils.NamedThreadFactory
+ 
+-typealias PushScope = String
+-
+-typealias AppServerKey = String
++// typealias PushScope = String
++// typealias AppServerKey = String
+ 
+ /**
+  * A implementation of a [PushProcessor] that should live as a singleton by being installed in the Application's
+@@ -81,7 +82,7 @@ class AutoPushFeature(
+     coroutineContext: CoroutineContext =
+         Executors.newSingleThreadExecutor(NamedThreadFactory("AutoPushFeature")).asCoroutineDispatcher(),
+     private val crashReporter: CrashReporting? = null,
+-) : PushProcessor, Observable<AutoPushFeature.Observer> by ObserverRegistry() {
++) : PushProcessor, Pusher() {
+ 
+     private val logger = Logger("AutoPushFeature")
+ 
+@@ -93,6 +94,13 @@ class AutoPushFeature(
+ 
+     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE) internal var connection: PushManagerInterface? = null
+ 
++    override val disableRateLimit: Boolean
++        get() = config.disableRateLimit
++
++    init {
++        PushProcessor.install(this)
++    }
++
+     /**
+      * Starts the push feature and initialization work needed. Also starts the [PushService] to ensure new messages come
+      * through.
+@@ -135,10 +143,26 @@ class AutoPushFeature(
+      */
+     override fun shutdown() {
+         withConnection {
+-            it.unsubscribeAll()
++            try {
++                it.unsubscribeAll()
++            } catch (e: PushApiException) {
++            }
+         }
+     }
+ 
++    override fun forEachScopes(block: (PushScope, String?) -> Unit) {
++        // TODO: uncomment once https://github.com/mozilla/application-services/pull/6671 is merged
++/*        val currentConnection = connection
++        currentConnection ?: run {
++            logger.warn("No current connection")
++         }
++        coroutineScope.launch {
++            currentConnection?.listSubscriptionReq()?.forEach {
++                block(it.scope, it.appServerKey)
++            }
++        } */
++    }
++
+     /**
+      * New registration tokens are received and sent to the AutoPush server which also performs subscriptions for each
+      * push type and notifies the subscribers.
+@@ -179,11 +203,11 @@ class AutoPushFeature(
+      * @param onSubscribeError The callback invoked with an [Exception] if the call does not successfully complete.
+      * @param onSubscribe The callback invoked when a subscription for the [scope] is created.
+      */
+-    fun subscribe(
+-        scope: String,
+-        appServerKey: String? = null,
+-        onSubscribeError: (Exception) -> Unit = {},
+-        onSubscribe: ((AutoPushSubscription) -> Unit) = {},
++    override fun subscribe(
++        scope: PushScope,
++        appServerKey: String?,
++        onSubscribeError: (Exception) -> Unit,
++        onSubscribe: ((AutoPushSubscription) -> Unit),
+     ) {
+         withConnection(errorBlock = { exception -> onSubscribeError(exception) }) {
+             val sub = it.subscribe(scope, appServerKey ?: "")
+@@ -198,10 +222,10 @@ class AutoPushFeature(
+      * @param onUnsubscribeError The callback invoked with an [Exception] if the call does not successfully complete.
+      * @param onUnsubscribe The callback invoked when a subscription for the [scope] is removed.
+      */
+-    fun unsubscribe(
+-        scope: String,
+-        onUnsubscribeError: (Exception) -> Unit = {},
+-        onUnsubscribe: (Boolean) -> Unit = {},
++    override fun unsubscribe(
++        scope: PushScope,
++        onUnsubscribeError: (Exception) -> Unit,
++        onUnsubscribe: (Boolean) -> Unit,
+     ) {
+         withConnection(errorBlock = { exception -> onUnsubscribeError(exception) }) {
+             onUnsubscribe(it.unsubscribe(scope))
+@@ -216,9 +240,9 @@ class AutoPushFeature(
+      * @param block The callback invoked when a subscription for the [scope] is found, otherwise null. Note: this will
+      *   not execute on the calls thread.
+      */
+-    fun getSubscription(
+-        scope: String,
+-        appServerKey: String? = null,
++    override fun getSubscription(
++        scope: PushScope,
++        appServerKey: String?,
+         block: (AutoPushSubscription?) -> Unit,
+     ) {
+         withConnection {
+@@ -276,14 +300,14 @@ class AutoPushFeature(
+         context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE)
+ 
+     /** Observers that want to receive updates for new subscriptions and messages. */
+-    interface Observer {
+-
+-        /** A subscription for the scope is available. */
+-        fun onSubscriptionChanged(scope: PushScope) = Unit
+-
+-        /** A messaged has been received for the [scope]. */
+-        fun onMessageReceived(scope: PushScope, message: ByteArray?) = Unit
+-    }
++//    interface Observer {
++//
++//        /** A subscription for the scope is available. */
++//        fun onSubscriptionChanged(scope: PushScope) = Unit
++//
++//        /** A messaged has been received for the [scope]. */
++//        fun onMessageReceived(scope: PushScope, message: ByteArray?) = Unit
++//    }
+ 
+     private fun exceptionHandler(onError: (PushError) -> Unit) = CoroutineExceptionHandler { _, e ->
+         when (e) {
+@@ -330,13 +354,13 @@ enum class Protocol {
+ }
+ 
+ /** The subscription information from AutoPush that can be used to send push messages to other devices. */
+-data class AutoPushSubscription(
++/* data class AutoPushSubscription(
+     val scope: PushScope,
+     val endpoint: String,
+     val publicKey: String,
+     val authKey: String,
+     val appServerKey: String?,
+-)
++) */
+ 
+ /**
+  * Configuration object for initializing the Push Manager with an AutoPush server.

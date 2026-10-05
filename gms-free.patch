@@ -1,16 +1,16 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 2e5436898c..81387361d6 100644
+index 7ff1b392bb..2932eae92f 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
 @@ -110,7 +110,6 @@ jna = "5.19.1"
- json = "20260719"
- jsoup = "1.23.1"
+ json = "20260814"
+ jsoup = "1.23.2"
  lottie = "6.7.1"
 -microg = "0.3.16.252432"
- okhttp = "5.4.0"
- okio = "3.18.1"
- sentry = "8.52.0"
-@@ -233,8 +232,6 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
+ okhttp = "5.5.0"
+ okio = "3.18.2"
+ sentry = "8.55.0"
+@@ -235,8 +234,6 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
  ksp-symbol-processing-common-deps = { module = "com.google.devtools.ksp:symbol-processing-common-deps", version.ref = "ksp" }
  mlkit-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkit-prompt" }
  osslicenses-plugin = { module = "com.google.android.gms:oss-licenses-plugin", version.ref = "osslicenses-plugin" }
@@ -20,10 +20,10 @@ index 2e5436898c..81387361d6 100644
  protobuf-javalite = { module = "com.google.protobuf:protobuf-javalite", version.ref = "protobuf" }
  
 diff --git a/mobile/android/android-components/.buildconfig.yml b/mobile/android/android-components/.buildconfig.yml
-index b4178d6fd6..3a48928be0 100644
+index 97f42f801c..16576765f0 100644
 --- a/mobile/android/android-components/.buildconfig.yml
 +++ b/mobile/android/android-components/.buildconfig.yml
-@@ -1163,7 +1163,6 @@ projects:
+@@ -1204,7 +1204,6 @@ projects:
      - components:feature-session
      - components:feature-tabs
      - components:lib-dataprotect
@@ -31,7 +31,7 @@ index b4178d6fd6..3a48928be0 100644
      - components:lib-publicsuffixlist
      - components:lib-state
      - components:service-firefox-accounts
-@@ -2076,18 +2075,6 @@ projects:
+@@ -2134,18 +2133,6 @@ projects:
      - components:support-test
      - components:tooling-fetch-tests
      - components:tooling-lint
@@ -51,7 +51,7 @@ index b4178d6fd6..3a48928be0 100644
      description: 'Javascript Expression Language: Powerful context-based expression
        parser and evaluator.'
 diff --git a/mobile/android/android-components/components/feature/ipprotection/build.gradle b/mobile/android/android-components/components/feature/ipprotection/build.gradle
-index 8abb50dae2..bae03858c8 100644
+index a035a426b9..fda23843c7 100644
 --- a/mobile/android/android-components/components/feature/ipprotection/build.gradle
 +++ b/mobile/android/android-components/components/feature/ipprotection/build.gradle
 @@ -24,7 +24,6 @@ dependencies {
@@ -64,10 +64,10 @@ index 8abb50dae2..bae03858c8 100644
      implementation project(':components:support-base')
 diff --git a/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/auth/gpi/IPProtectionGpiProvider.kt b/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/auth/gpi/IPProtectionGpiProvider.kt
 deleted file mode 100644
-index d56a91b36f..0000000000
+index bbc45bd152..0000000000
 --- a/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/auth/gpi/IPProtectionGpiProvider.kt
 +++ /dev/null
-@@ -1,53 +0,0 @@
+@@ -1,54 +0,0 @@
 -/* This Source Code Form is subject to the terms of the Mozilla Public
 - * License, v. 2.0. If a copy of the MPL was not distributed with this
 - * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -86,17 +86,15 @@ index d56a91b36f..0000000000
 -import mozilla.components.support.base.log.logger.Logger
 -
 -/**
-- * [IPProtectionAuthProvider] that wires Google Play Integrity (GPI) warm-up and token
-- * retrieval into the IP protection handler.
+- * [IPProtectionAuthProvider] that wires Google Play Integrity (GPI) warm-up and token retrieval into the IP protection
+- * handler.
 - *
 - * N.B: This is intentionally kept separate from [mozilla.components.feature.ipprotection.IPProtectionFeature] so GPI
 - * support can be composed in without affecting the default behavior.
 - *
 - * @param integrityClient the [GooglePlayIntegrityClient] to supply GPI tokens to the proxy service.
 - */
--class IPProtectionGpiProvider(
--    private val integrityClient: GooglePlayIntegrityClient,
--) : IPProtectionAuthProvider {
+-class IPProtectionGpiProvider(private val integrityClient: GooglePlayIntegrityClient) : IPProtectionAuthProvider {
 -    private val logger = Logger("IPP:Gpi")
 -
 -    override fun configure(handler: IPProtectionHandler, scope: CoroutineScope) {
@@ -111,22 +109,25 @@ index d56a91b36f..0000000000
 -
 -                override fun getToken(onComplete: (String?) -> Unit) {
 -                    scope.launch {
--                        val token = ipProtectionIntegrityClient.request()
--                            .onFailure { logger.error("GPI token request failed", it) }
--                            .getOrNull()?.value
+-                        val token =
+-                            ipProtectionIntegrityClient
+-                                .request()
+-                                .onFailure { logger.error("GPI token request failed", it) }
+-                                .getOrNull()
+-                                ?.value
 -                        onComplete(token)
 -                    }
 -                }
--            },
+-            }
 -        )
 -    }
 -}
 diff --git a/mobile/android/android-components/components/feature/ipprotection/src/test/java/mozilla/components/feature/ipprotection/IPProtectionGpiProviderTest.kt b/mobile/android/android-components/components/feature/ipprotection/src/test/java/mozilla/components/feature/ipprotection/IPProtectionGpiProviderTest.kt
 deleted file mode 100644
-index 49cd1d425e..0000000000
+index dec6a62a9c..0000000000
 --- a/mobile/android/android-components/components/feature/ipprotection/src/test/java/mozilla/components/feature/ipprotection/IPProtectionGpiProviderTest.kt
 +++ /dev/null
-@@ -1,92 +0,0 @@
+@@ -1,95 +0,0 @@
 -/* This Source Code Form is subject to the terms of the Mozilla Public
 - * License, v. 2.0. If a copy of the MPL was not distributed with this
 - * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -159,9 +160,10 @@ index 49cd1d425e..0000000000
 -
 -    @Test
 -    fun `WHEN the provider warms up THEN it delegates to the integrity client`() = runTest {
--        val integrityClient = coMock<GooglePlayIntegrityClient> {
--            whenever(warmUp()).thenReturn(true)
--        }
+-        val integrityClient =
+-            coMock<GooglePlayIntegrityClient> {
+-                whenever(warmUp()).thenReturn(true)
+-            }
 -        val handler = mock<IPProtectionHandler>()
 -        val testScope = CoroutineScope(StandardTestDispatcher(testScheduler))
 -
@@ -179,10 +181,11 @@ index 49cd1d425e..0000000000
 -
 -    @Test
 -    fun `WHEN a token is requested THEN the consumer client token is returned`() = runTest {
--        val integrityClient = mock<GooglePlayIntegrityClient> {
--            whenever(forConsumer(IntegrityConsumer.IpProtection))
--                .thenReturn(IntegrityClient { Result.success(IntegrityToken("gpi-token")) })
--        }
+-        val integrityClient =
+-            mock<GooglePlayIntegrityClient> {
+-                whenever(forConsumer(IntegrityConsumer.IpProtection))
+-                    .thenReturn(IntegrityClient { Result.success(IntegrityToken("gpi-token")) })
+-            }
 -        val handler = mock<IPProtectionHandler>()
 -        val testScope = CoroutineScope(StandardTestDispatcher(testScheduler))
 -
@@ -200,10 +203,11 @@ index 49cd1d425e..0000000000
 -
 -    @Test
 -    fun `WHEN the token request fails THEN null is returned`() = runTest {
--        val integrityClient = mock<GooglePlayIntegrityClient> {
--            whenever(forConsumer(IntegrityConsumer.IpProtection))
--                .thenReturn(IntegrityClient { Result.failure(RuntimeException("boom")) })
--        }
+-        val integrityClient =
+-            mock<GooglePlayIntegrityClient> {
+-                whenever(forConsumer(IntegrityConsumer.IpProtection))
+-                    .thenReturn(IntegrityClient { Result.failure(RuntimeException("boom")) })
+-            }
 -        val handler = mock<IPProtectionHandler>()
 -        val testScope = CoroutineScope(StandardTestDispatcher(testScheduler))
 -
@@ -220,10 +224,10 @@ index 49cd1d425e..0000000000
 -    }
 -}
 diff --git a/mobile/android/fenix/app/build.gradle b/mobile/android/fenix/app/build.gradle
-index e04de64816..5a80596712 100644
+index 9a53616cce..b11d36ac24 100644
 --- a/mobile/android/fenix/app/build.gradle
 +++ b/mobile/android/fenix/app/build.gradle
-@@ -602,7 +602,6 @@ dependencies {
+@@ -600,7 +600,6 @@ dependencies {
      implementation libs.kotlinx.coroutines
      implementation libs.kotlinx.serialization.json
      implementation libs.mozilla.glean
@@ -232,19 +236,21 @@ index e04de64816..5a80596712 100644
      implementation libs.sentry
      implementation libs.androidx.documentfile
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-index ee897a1dd1..21a46d390c 100644
+index 3f246142ee..c2b79430b2 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-@@ -10,7 +10,6 @@ import mozilla.components.browser.state.store.BrowserStore
+@@ -10,9 +10,6 @@ import mozilla.components.browser.state.store.BrowserStore
  import mozilla.components.concept.engine.Engine
  import mozilla.components.feature.ipprotection.IPProtectionFeature
  import mozilla.components.feature.ipprotection.IPProtectionStorageSynchronizer
 -import mozilla.components.feature.ipprotection.auth.gpi.IPProtectionGpiProvider
+-import mozilla.components.feature.ipprotection.store.DefaultIPProtectionLocationRepository
+-import mozilla.components.feature.ipprotection.store.IPProtectionLocationMiddleware
  import mozilla.components.feature.ipprotection.store.IPProtectionStore
  import mozilla.components.service.fxa.manager.FxaAccountManager
  import mozilla.components.service.fxa.store.SyncStore
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
-index f4b8174470..0ab7303721 100644
+index f4c2df1f76..55cb2b4a11 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
 @@ -9,7 +9,6 @@ import android.content.SharedPreferences
@@ -255,32 +261,44 @@ index f4b8174470..0ab7303721 100644
  import kotlinx.coroutines.CoroutineDispatcher
  import kotlinx.coroutines.CoroutineScope
  import kotlinx.coroutines.Dispatchers
-@@ -66,7 +65,10 @@ class ActivationPing(
+@@ -59,11 +58,13 @@ class ActivationPing(
+         Activation.activationId.generateAndSet()
  
          CoroutineScope(backgroundDispatcher).launch {
-             val hashedId = getHashedIdentifier(
--                retrieveAdvertisingIdInfo = { AdvertisingIdClient.getAdvertisingIdInfo(context).id },
+-            val hashedId =
+-                getHashedIdentifier(
+-                    retrieveAdvertisingIdInfo = { AdvertisingIdClient.getAdvertisingIdInfo(context).id },
+-                    encodeToString = Base64::encodeToString,
+-                )
++            val hashedId = getHashedIdentifier(
 +                // No GMS in this build: the advertising ID cannot be
 +                // retrieved, so the identifier stays unset (same as on
 +                // devices without GMS). The ping is still sent.
 +                retrieveAdvertisingIdInfo = { null },
-                 encodeToString = Base64::encodeToString,
-             )
++                encodeToString = Base64::encodeToString,
++            )
              if (hashedId != null) {
+                 Logger.info("ActivationPing - generating ping with the hashed id")
+                 // We have a valid, hashed Google Advertising ID.
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt
-index 1fedd8167f..d38e39b984 100644
+index 3d9fbfa539..04fa41ade1 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt
-@@ -6,8 +6,6 @@ package org.mozilla.fenix.components.metrics
+@@ -6,13 +6,6 @@ package org.mozilla.fenix.components.metrics
  
  import android.util.Base64
  import androidx.annotation.VisibleForTesting
 -import com.google.android.gms.common.GooglePlayServicesNotAvailableException
 -import com.google.android.gms.common.GooglePlayServicesRepairableException
+-import java.io.IOException
+-import java.security.NoSuchAlgorithmException
+-import java.security.spec.InvalidKeySpecException
+-import javax.crypto.SecretKeyFactory
+-import javax.crypto.spec.PBEKeySpec
  import kotlinx.coroutines.Dispatchers
  import kotlinx.coroutines.withContext
  import mozilla.components.browser.state.search.SearchEngine
-@@ -173,12 +171,6 @@ object MetricsUtils {
+@@ -172,12 +165,6 @@ object MetricsUtils {
      internal fun getAdvertisingID(retrieveAdvertisingIdInfo: () -> String?): String? {
          return try {
              retrieveAdvertisingIdInfo()
@@ -294,10 +312,10 @@ index 1fedd8167f..d38e39b984 100644
              // This is unlikely to happen, as this should be running off the main thread.
              Logger.debug("getAdvertisingID() - AdvertisingIdClient must be called off the main thread")
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-index b10c6af6c1..105b93180c 100644
+index 7b440fb3c9..5d782a44e0 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-@@ -5,26 +5,15 @@
+@@ -5,31 +5,15 @@
  package org.mozilla.fenix.components
  
  import android.app.Activity
@@ -312,6 +330,11 @@ index b10c6af6c1..105b93180c 100644
 -import com.google.android.gms.tasks.Task
 -import com.google.android.play.core.review.ReviewInfo
 -import com.google.android.play.core.review.ReviewManager
+-import java.text.SimpleDateFormat
+-import java.util.Date
+-import java.util.Locale
+-import java.util.concurrent.Executor
+-import kotlin.test.assertIs
  import kotlinx.coroutines.launch
  import kotlinx.coroutines.test.runTest
 -import mozilla.components.support.test.assertUnused
@@ -324,16 +347,14 @@ index b10c6af6c1..105b93180c 100644
  import org.junit.Rule
  import org.junit.Test
  import org.junit.runner.RunWith
-@@ -35,94 +24,76 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
+@@ -40,90 +24,76 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
  import org.mozilla.fenix.components.ReviewPromptAttemptResult.Unknown
  import org.mozilla.fenix.helpers.FenixGleanTestRule
  import org.robolectric.RobolectricTestRunner
 +import kotlin.test.assertIs
- import java.text.SimpleDateFormat
- import java.util.Date
- import java.util.Locale
--import java.util.concurrent.Executor
--import kotlin.test.assertIs
++import java.text.SimpleDateFormat
++import java.util.Date
++import java.util.Locale
  
 +/**
 + * Tests for the (GMS-free) [PlayStoreReviewPromptController].
@@ -349,75 +370,86 @@ index b10c6af6c1..105b93180c 100644
  @RunWith(RobolectricTestRunner::class)
  class PlayStoreReviewPromptControllerTest {
  
-     @get:Rule
-     val gleanTestRule = FenixGleanTestRule(testContext)
+     @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
  
-+    // ---- the GMS-free behavior of the stubbed controller ----
-+
-     @Test
--    fun `GIVEN activity is resumed WHEN tryPromptReview is called THEN launches review flow`() =
-+    fun `GIVEN a GMS-free build WHEN tryPromptReview is called THEN the attempt is Unknown`() =
-         runTest {
--            val reviewManager = SuccessfulReviewManager(testContext)
-             val controller = PlayStoreReviewPromptController(
+-    @Test
+-    fun `GIVEN activity is resumed WHEN tryPromptReview is called THEN launches review flow`() = runTest {
+-        val reviewManager = SuccessfulReviewManager(testContext)
+-        val controller =
+-            PlayStoreReviewPromptController(
 -                manager = reviewManager,
-                 numberOfAppLaunches = { 5 },
-             )
-             launchActivity<ComponentActivity>().use { scenario ->
-                 scenario.moveToState(Lifecycle.State.RESUMED)
-                 scenario.onActivity { activity ->
-                     activity.lifecycleScope.launch {
--                        controller.tryPromptReview(activity)
+-                numberOfAppLaunches = { 5 },
+-            )
+-        launchActivity<ComponentActivity>().use { scenario ->
+-            scenario.moveToState(Lifecycle.State.RESUMED)
+-            scenario.onActivity { activity ->
+-                activity.lifecycleScope.launch {
+-                    controller.tryPromptReview(activity)
 -
--                        assertTrue(reviewManager.promptHasBeenRequested)
-+                        val result = controller.tryPromptReview(activity)
-+                        assertIs<Unknown>(result)
-                     }
-                 }
-             }
-         }
+-                    assertTrue(reviewManager.promptHasBeenRequested)
+-                }
+-            }
+-        }
+-    }
++    // ---- the GMS-free behavior of the stubbed controller ----
  
      @Test
 -    fun `GIVEN activity is destroyed WHEN tryPromptReview is called THEN doesn't launch review flow`() = runTest {
 -        val reviewManager = SuccessfulReviewManager(testContext)
-+    fun `GIVEN a GMS-free build WHEN tryLaunchPlayStoreReview is called THEN nothing throws`() {
-         val controller = PlayStoreReviewPromptController(
--            manager = reviewManager,
-             numberOfAppLaunches = { 5 },
-         )
-         launchActivity<ComponentActivity>().use { scenario ->
+-        val controller =
+-            PlayStoreReviewPromptController(
+-                manager = reviewManager,
++    fun `GIVEN a GMS-free build WHEN tryPromptReview is called THEN the attempt is Unknown`() =
++        runTest {
++            val controller = PlayStoreReviewPromptController(
+                 numberOfAppLaunches = { 5 },
+             )
+-        launchActivity<ComponentActivity>().use { scenario ->
 -            scenario.moveToState(Lifecycle.State.RESUMED)
-             scenario.onActivity { activity ->
+-            scenario.onActivity { activity ->
 -                activity.lifecycleScope
 -                    .launch {
 -                        scenario.moveToState(Lifecycle.State.DESTROYED)
 -                        controller.tryPromptReview(activity)
--                    }
++            launchActivity<ComponentActivity>().use { scenario ->
++                scenario.moveToState(Lifecycle.State.RESUMED)
++                scenario.onActivity { activity ->
++                    activity.lifecycleScope.launch {
++                        val result = controller.tryPromptReview(activity)
++                        assertIs<Unknown>(result)
+                     }
 -                    .joinBlocking()
-+                controller.tryLaunchPlayStoreReview(activity) { /* openInNewTab */ }
++                }
              }
          }
 -        assertFalse(reviewManager.promptHasBeenRequested)
      }
  
--    @Test
+     @Test
 -    fun `WHEN the reviews API fails THEN returns Error result`() = runTest {
--        val controller = PlayStoreReviewPromptController(
--            manager = FailingReviewManager(),
--            numberOfAppLaunches = { 5 },
--        )
--        launchActivity<ComponentActivity>().use { scenario ->
--            scenario.onActivity { activity ->
+-        val controller =
+-            PlayStoreReviewPromptController(
+-                manager = FailingReviewManager(),
+-                numberOfAppLaunches = { 5 },
+-            )
++    fun `GIVEN a GMS-free build WHEN tryLaunchPlayStoreReview is called THEN nothing throws`() {
++        val controller = PlayStoreReviewPromptController(
++            numberOfAppLaunches = { 5 },
++        )
+         launchActivity<ComponentActivity>().use { scenario ->
+             scenario.onActivity { activity ->
 -                activity.lifecycleScope.launch {
 -                    val result = controller.tryPromptReview(activity)
 -
 -                    assertIs<Error>(result)
 -                }
--            }
--        }
--    }
-+    // ---- ReviewPromptAttemptResult.from: classifying the ReviewInfo string ----
++                controller.tryLaunchPlayStoreReview(activity) { /* openInNewTab */ }
+             }
+         }
+     }
  
++    // ---- ReviewPromptAttemptResult.from: classifying the ReviewInfo string ----
++
      @Test
 -    fun `WHEN review info contains 'isNoOp=false' THEN prompt was displayed`() {
 +    fun `WHEN review info contains isNoOp=false THEN prompt was displayed`() {
@@ -442,7 +474,7 @@ index b10c6af6c1..105b93180c 100644
          assertEquals(Unknown, displayState)
      }
  
-@@ -130,6 +101,8 @@ class PlayStoreReviewPromptControllerTest {
+@@ -131,6 +101,8 @@ class PlayStoreReviewPromptControllerTest {
          return "ReviewInfo{pendingIntent=PendingIntent{5b613b1: android.os.BinderProxy@46c8096}, $optionalArg}"
      }
  
@@ -451,7 +483,7 @@ index b10c6af6c1..105b93180c 100644
      @Test
      fun reviewPromptWasDisplayed() {
          testRecordReviewPromptEventRecordsTheExpectedData(Displayed, "true")
-@@ -177,66 +150,3 @@ class PlayStoreReviewPromptControllerTest {
+@@ -178,83 +150,3 @@ class PlayStoreReviewPromptControllerTest {
          }
      }
  }
@@ -474,23 +506,29 @@ index b10c6af6c1..105b93180c 100644
 -
 -private class FailingReviewManager : ReviewManager {
 -    override fun requestReviewFlow() = FailedTask<ReviewInfo>()
+-
 -    override fun launchReviewFlow(activity: Activity, reviewInfo: ReviewInfo) = assertUnused()
 -}
 -
 -private class SuccessfulTask<T>(private val result: T) : CompleteTask<T>() {
 -    override fun isSuccessful() = true
+-
 -    override fun getResult() = result
+-
 -    override fun <X : Throwable?> getResult(exceptionType: Class<X>) = result
+-
 -    override fun getException() = null
 -}
 -
 -private class FailedTask<T> : CompleteTask<T>() {
 -    override fun isSuccessful() = false
+-
 -    override fun getException() = RuntimeException("Unexpected exception.")
 -}
 -
 -private open class CompleteTask<T> : FakeGmsTask<T>() {
 -    override fun isComplete() = true
+-
 -    override fun isCanceled() = false
 -
 -    override fun addOnCompleteListener(activity: Activity, listener: OnCompleteListener<T>): Task<T> {
@@ -506,23 +544,34 @@ index b10c6af6c1..105b93180c 100644
 -
 -private open class FakeGmsTask<T> : Task<T>() {
 -    override fun isSuccessful(): Boolean = assertUnused()
+-
 -    override fun isComplete(): Boolean = assertUnused()
+-
 -    override fun isCanceled(): Boolean = assertUnused()
+-
 -    override fun getResult(): T? = assertUnused()
+-
 -    override fun <X : Throwable?> getResult(exceptionType: Class<X>): T? = assertUnused()
+-
 -    override fun getException(): Exception? = assertUnused()
+-
 -    override fun addOnSuccessListener(listener: OnSuccessListener<in T>): Task<T> = assertUnused()
+-
 -    override fun addOnSuccessListener(executor: Executor, listener: OnSuccessListener<in T>): Task<T> = assertUnused()
+-
 -    override fun addOnSuccessListener(activity: Activity, listener: OnSuccessListener<in T>): Task<T> = assertUnused()
+-
 -    override fun addOnFailureListener(listener: OnFailureListener): Task<T> = assertUnused()
+-
 -    override fun addOnFailureListener(executor: Executor, listener: OnFailureListener): Task<T> = assertUnused()
+-
 -    override fun addOnFailureListener(activity: Activity, listener: OnFailureListener): Task<T> = assertUnused()
 -}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
-index 0c8833803f..97f0c3b6dc 100644
+index 2c9614dddf..b64a5a0144 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
-@@ -4,11 +4,6 @@
+@@ -4,12 +4,6 @@
  
  package org.mozilla.fenix.components.metrics
  
@@ -531,28 +580,35 @@ index 0c8833803f..97f0c3b6dc 100644
 -import com.google.android.gms.common.GooglePlayServicesRepairableException
 -import io.mockk.every
 -import io.mockk.mockk
+-import java.io.IOException
  import kotlinx.coroutines.test.runTest
  import org.junit.Assert.assertArrayEquals
  import org.junit.Assert.assertEquals
-@@ -19,12 +14,14 @@ import java.io.IOException
+@@ -19,14 +13,15 @@ import org.junit.Test
  class MetricsUtilsTest {
  
      @Test
 -    fun `getAdvertisingID() returns null if the API throws`() {
+-        val exceptions =
+-            listOf(
+-                GooglePlayServicesNotAvailableException(1),
+-                GooglePlayServicesRepairableException(0, "", mockk()),
+-                IllegalStateException(),
+-                IOException(),
+-            )
 +    fun `getAdvertisingID() returns null if the retrieve callback throws`() {
 +        // No GMS in this build: the callback is always { null } in
 +        // production (see ActivationPing), but the null-on-exception contract
 +        // is what makes a future backend swap safe, so it stays tested.
-         val exceptions = listOf(
--            GooglePlayServicesNotAvailableException(1),
--            GooglePlayServicesRepairableException(0, "", mockk()),
-             IllegalStateException(),
-             IOException(),
++        val exceptions = listOf(
++            IllegalStateException(),
++            IOException(),
 +            NullPointerException(),
-         )
++        )
  
          exceptions.forEach {
-@@ -33,20 +30,14 @@ class MetricsUtilsTest {
+             assertNull(MetricsUtils.getAdvertisingID { throw it })
+@@ -34,20 +29,14 @@ class MetricsUtilsTest {
      }
  
      @Test
@@ -577,7 +633,7 @@ index 0c8833803f..97f0c3b6dc 100644
      }
  
      @Test
-@@ -79,6 +70,39 @@ class MetricsUtilsTest {
+@@ -111,6 +100,39 @@ class MetricsUtilsTest {
          assertArrayEquals(expectedDigestBytes, shaDigest)
      }
  
@@ -618,10 +674,10 @@ index 0c8833803f..97f0c3b6dc 100644
          const val ENGINE_SOURCE_IDENTIFIER = "google-2018"
      }
 diff --git a/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt b/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
-index 7a767208f8..112aa055e7 100644
+index c532d8ff9c..ebcc19d446 100644
 --- a/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
 +++ b/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
-@@ -551,7 +551,18 @@ class ProjectPlugin : Plugin<Project> {
+@@ -586,7 +586,18 @@ class ProjectPlugin : Plugin<Project> {
                  systemProperty("logging.test-mode", "true")
                  systemProperty("javax.net.ssl.trustStoreType", "JKS")
  

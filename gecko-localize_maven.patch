@@ -1,5 +1,5 @@
 diff --git a/build.gradle b/build.gradle
-index ea771eed1cf3..7a40b689bf3e 100644
+index 3183b33a31..8feae4d5fb 100644
 --- a/build.gradle
 +++ b/build.gradle
 @@ -5,14 +5,9 @@ import org.tomlj.TomlTable
@@ -21,10 +21,10 @@ index ea771eed1cf3..7a40b689bf3e 100644
  
      dependencies {
 diff --git a/mobile/android/gradle/mozconfig.gradle b/mobile/android/gradle/mozconfig.gradle
-index fc8058d5fa0e..dd78dd06f1f3 100644
+index 611fa29e6f..027d8aff6f 100644
 --- a/mobile/android/gradle/mozconfig.gradle
 +++ b/mobile/android/gradle/mozconfig.gradle
-@@ -109,12 +109,7 @@ if (sourceRepoFile.canRead()) {
+@@ -302,12 +302,7 @@ if (sourceRepoFile.canRead()) {
  // `delegate` refers to the RepositoryHandler that receives method calls.
  // In Kotlin, pass `this`.
  gradle.ext.configureMavenRepositories = { handler ->

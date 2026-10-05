@@ -1,8 +1,8 @@
 diff --git a/mobile/android/android-components/.buildconfig.yml b/mobile/android/android-components/.buildconfig.yml
-index bdec0f362b1b..b4178d6fd644 100644
+index f9a083a682..97f42f801c 100644
 --- a/mobile/android/android-components/.buildconfig.yml
 +++ b/mobile/android/android-components/.buildconfig.yml
-@@ -2171,17 +2171,6 @@ projects:
+@@ -2229,17 +2229,6 @@ projects:
      - components:support-base
      - components:support-test
      - components:tooling-lint
@@ -21,10 +21,10 @@ index bdec0f362b1b..b4178d6fd644 100644
      description: A library to detect shake gestures from accelerometer data
      path: components/lib/shake
 diff --git a/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/IPProtectionFeature.kt b/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/IPProtectionFeature.kt
-index c3af5a0ee0eb..9f6bfc0f8e00 100644
+index 6ea2c2fef7..aced4c9e19 100644
 --- a/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/IPProtectionFeature.kt
 +++ b/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/IPProtectionFeature.kt
-@@ -49,14 +49,12 @@ import mozilla.components.support.base.log.logger.Logger
+@@ -51,14 +51,12 @@ import mozilla.components.support.base.log.logger.Logger
   * @param store [IPProtectionStore] that holds the feature state.
   * @param engine [Engine] used to register the IP protection delegate and obtain the handler.
   * @param accountManager [FxaAccountManager] used to supply FxA tokens to the proxy service.
@@ -39,16 +39,16 @@ index c3af5a0ee0eb..9f6bfc0f8e00 100644
      private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
  ) {
      private val logger = Logger("IPP:Feature")
-@@ -197,7 +195,6 @@ class IPProtectionFeature(
+@@ -222,7 +220,6 @@ class IPProtectionFeature(
+                         }
                      }
-                 },
-             )
--            extraAuthProvider?.configure(this, mainScope)
-             // Initialization needs to be done ASAP whether we are using the service or not to avoid start-up delays.
-             // We do need to register our listeners first to avoid dropping a message because,
-             // as a side effect, the init call triggers `IPProtectionController#onServiceStateChanged`
+                 )
+-                extraAuthProvider?.configure(this, mainScope)
+                 // Initialization needs to be done ASAP whether we are using the service or not to avoid start-up
+                 // delays.
+                 // We do need to register our listeners first to avoid dropping a message because,
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/build.gradle b/mobile/android/android-components/components/lib/integrity-googleplay/build.gradle
-index 94309dd293c6..afd0024668ca 100644
+index 94309dd293..afd0024668 100644
 --- a/mobile/android/android-components/components/lib/integrity-googleplay/build.gradle
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/build.gradle
 @@ -36,8 +36,8 @@ dependencies {
@@ -64,7 +64,7 @@ index 94309dd293c6..afd0024668ca 100644
      testImplementation libs.androidx.test.junit
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogCode.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogCode.java
 new file mode 100644
-index 000000000000..088f8655d5aa
+index 0000000000..088f8655d5
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogCode.java
 @@ -0,0 +1,10 @@
@@ -80,7 +80,7 @@ index 000000000000..088f8655d5aa
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogRequest.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogRequest.java
 new file mode 100644
-index 000000000000..49c4eb88cf40
+index 0000000000..49c4eb88cf
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogRequest.java
 @@ -0,0 +1,17 @@
@@ -103,7 +103,7 @@ index 000000000000..49c4eb88cf40
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogResponse.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogResponse.java
 new file mode 100644
-index 000000000000..a7c35b55cce0
+index 0000000000..a7c35b55cc
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityDialogResponse.java
 @@ -0,0 +1,7 @@
@@ -116,7 +116,7 @@ index 000000000000..a7c35b55cce0
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityErrorCode.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityErrorCode.java
 new file mode 100644
-index 000000000000..8f5526383758
+index 0000000000..8f55263837
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityErrorCode.java
 @@ -0,0 +1,28 @@
@@ -150,7 +150,7 @@ index 000000000000..8f5526383758
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityManager.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityManager.java
 new file mode 100644
-index 000000000000..cb9dd8f7f029
+index 0000000000..cb9dd8f7f0
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityManager.java
 @@ -0,0 +1,15 @@
@@ -171,7 +171,7 @@ index 000000000000..cb9dd8f7f029
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityManagerFactory.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityManagerFactory.java
 new file mode 100644
-index 000000000000..febc8c5f007c
+index 0000000000..febc8c5f00
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityManagerFactory.java
 @@ -0,0 +1,20 @@
@@ -197,7 +197,7 @@ index 000000000000..febc8c5f007c
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityServiceException.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityServiceException.java
 new file mode 100644
-index 000000000000..abbbd967ae93
+index 0000000000..abbbd967ae
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityServiceException.java
 @@ -0,0 +1,17 @@
@@ -220,7 +220,7 @@ index 000000000000..abbbd967ae93
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityTokenRequest.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityTokenRequest.java
 new file mode 100644
-index 000000000000..e42b281cacc9
+index 0000000000..e42b281cac
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityTokenRequest.java
 @@ -0,0 +1,18 @@
@@ -244,7 +244,7 @@ index 000000000000..e42b281cacc9
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityTokenResponse.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityTokenResponse.java
 new file mode 100644
-index 000000000000..91dc1192d9e3
+index 0000000000..91dc1192d9
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/IntegrityTokenResponse.java
 @@ -0,0 +1,11 @@
@@ -261,7 +261,7 @@ index 000000000000..91dc1192d9e3
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityException.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityException.java
 new file mode 100644
-index 000000000000..98095e77388e
+index 0000000000..98095e7738
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityException.java
 @@ -0,0 +1,18 @@
@@ -285,7 +285,7 @@ index 000000000000..98095e77388e
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityManager.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityManager.java
 new file mode 100644
-index 000000000000..e962c0ab2872
+index 0000000000..e962c0ab28
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityManager.java
 @@ -0,0 +1,161 @@
@@ -452,7 +452,7 @@ index 000000000000..e962c0ab2872
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityWebViewRequestMode.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityWebViewRequestMode.java
 new file mode 100644
-index 000000000000..9931fc687e00
+index 0000000000..9931fc687e
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/StandardIntegrityWebViewRequestMode.java
 @@ -0,0 +1,8 @@
@@ -466,7 +466,7 @@ index 000000000000..9931fc687e00
 +}
 diff --git a/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/model/StandardIntegrityErrorCode.java b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/model/StandardIntegrityErrorCode.java
 new file mode 100644
-index 000000000000..918c7fb11d00
+index 0000000000..918c7fb11d
 --- /dev/null
 +++ b/mobile/android/android-components/components/lib/integrity-googleplay/src/main/java/com/google/play/core/integrity/model/StandardIntegrityErrorCode.java
 @@ -0,0 +1,24 @@

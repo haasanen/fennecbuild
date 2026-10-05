@@ -1,8 +1,8 @@
 diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
-index c2e19e45d814..98e033a5f114 100644
+index 71adba1b96..7e6bca66a7 100644
 --- a/mobile/android/geckoview/build.gradle
 +++ b/mobile/android/geckoview/build.gradle
-@@ -151,7 +151,7 @@ android {
+@@ -153,7 +153,7 @@ android {
      }
  
      publishing {
@@ -11,7 +11,7 @@ index c2e19e45d814..98e033a5f114 100644
      }
  
      namespace = 'org.mozilla.geckoview'
-@@ -407,10 +407,10 @@ publishing {
+@@ -406,10 +406,10 @@ publishing {
      }
  }
  
@@ -26,7 +26,7 @@ index c2e19e45d814..98e033a5f114 100644
  
          pom {
 diff --git a/mobile/android/gradle.configure b/mobile/android/gradle.configure
-index cd654ec647d4..daf635aa178f 100644
+index 3ffdc4946f..3e1b7cfc9e 100644
 --- a/mobile/android/gradle.configure
 +++ b/mobile/android/gradle.configure
 @@ -65,16 +65,16 @@ def gradle_android_build_config():

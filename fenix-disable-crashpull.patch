@@ -1,44 +1,52 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/gecko/GeckoProvider.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/gecko/GeckoProvider.kt
-index e45acf737c9a..a4147189067c 100644
+index 1edcf54eeb..35c08d474b 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/gecko/GeckoProvider.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/gecko/GeckoProvider.kt
-@@ -7,7 +7,6 @@ package org.mozilla.fenix.gecko
- import android.content.Context
+@@ -8,7 +8,6 @@ import android.content.Context
  import androidx.annotation.VisibleForTesting
+ import kotlinx.coroutines.CoroutineScope
  import mozilla.components.browser.engine.gecko.autofill.GeckoAutocompleteStorageDelegate
 -import mozilla.components.browser.engine.gecko.crash.GeckoCrashPullDelegate
  import mozilla.components.browser.engine.gecko.ext.toContentBlockingSetting
  import mozilla.components.concept.engine.EngineSession.TrackingProtectionPolicy
  import mozilla.components.concept.storage.CreditCardsAddressesStorage
-@@ -71,6 +70,7 @@ object GeckoProvider {
-             ),
-         )
+@@ -86,14 +85,15 @@ object GeckoProvider {
+                 applicationScope = applicationScope,
+             )
  
+-        geckoRuntime.crashPullDelegate =
+-            GeckoCrashPullDelegate(
+-                dispatcher = { crashIDs ->
+-                    context.components.appStore.dispatch(
+-                        AppAction.CrashActionWrapper(CrashAction.CheckDeferred(crashIDs.toList()))
+-                    )
+-                }
+-            )
 +        /*
-         geckoRuntime.crashPullDelegate = GeckoCrashPullDelegate(
-             dispatcher = { crashIDs ->
-                 context.components.appStore.dispatch(
-@@ -78,6 +78,7 @@ object GeckoProvider {
-                 )
-             },
-         )
++        geckoRuntime.crashPullDelegate = GeckoCrashPullDelegate(
++            dispatcher = { crashIDs ->
++                context.components.appStore.dispatch(
++                    AppAction.CrashActionWrapper(CrashAction.CheckDeferred(crashIDs.toList())),
++                )
++            },
++        )
 +        */
  
          return geckoRuntime
      }
-@@ -124,7 +125,6 @@ object GeckoProvider {
-             .extensionsProcessEnabled(true)
-             .extensionsWebAPIEnabled(true)
-             .translationsOfferPopup(context.components.settings.offerTranslation)
--            .crashPullNeverShowAgain(context.components.settings.crashPullNeverShowAgain)
-             .setSameDocumentNavigationOverridesLoadType(
-                 FxNimbus.features.sameDocumentNavigationOverridesLoadType.value().enabled,
-             )
+@@ -132,7 +132,6 @@ object GeckoProvider {
+                 .extensionsProcessEnabled(true)
+                 .extensionsWebAPIEnabled(true)
+                 .translationsOfferPopup(context.components.settings.offerTranslation)
+-                .crashPullNeverShowAgain(context.components.settings.crashPullNeverShowAgain)
+                 .setSameDocumentNavigationOverridesLoadType(
+                     FxNimbus.features.sameDocumentNavigationOverridesLoadType.value().enabled
+                 )
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-index bcf30637b845..27ce363913ec 100644
+index 5485655fa5..4c45e3bee5 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-@@ -376,7 +376,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
+@@ -429,7 +429,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
          }
  
          requirePreference<SwitchPreferenceCompat>(R.string.pref_key_crash_pull_never_show_again).apply {
@@ -47,31 +55,3 @@ index bcf30637b845..27ce363913ec 100644
              isChecked = settings.crashPullNeverShowAgain
              onPreferenceChangeListener = SharedPreferenceUpdater()
          }
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 6fb557f631f1..405897d20c26 100644
---- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-@@ -605,10 +605,7 @@ class Settings(
-                 true,
-             )
- 
--    var crashReportChoice by stringPreference(
--        appContext.getPreferenceKey(R.string.pref_key_crash_reporting_choice),
--        default = CrashReportOption.Ask.toString(),
--    )
-+    var crashReportChoice = CrashReportOption.Never.toString()
- 
-     val isRemoteDebuggingEnabled by booleanPreference(
-         appContext.getPreferenceKey(R.string.pref_key_remote_debugging),
-@@ -1042,10 +1039,7 @@ class Settings(
-      * Indicates if the user denies to ever see again the Remote Settings crash
-      * pull UI.
-      */
--    var crashPullNeverShowAgain: Boolean by booleanPreference(
--        appContext.getPreferenceKey(R.string.pref_key_crash_pull_never_show_again),
--        default = false,
--    )
-+    var crashPullNeverShowAgain: Boolean = true
- 
-     @VisibleForTesting
-     internal fun timeNowInMillis(): Long = System.currentTimeMillis()

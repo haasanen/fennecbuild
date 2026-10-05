@@ -20,7 +20,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."   # repo root
 
-VNAME="${1:-155.0.0}"
+VNAME="${1:-157.0.0}"
 VCODE="${2:-0}"
 SHA="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 
