@@ -470,10 +470,10 @@ index 0000000000..1b2763a616
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
-index 0000000000..14e6a628df
+index 0000000000..f89b06d387
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,285 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -509,6 +509,7 @@ index 0000000000..14e6a628df
 +  static final String TAG = "GeckoCtap2Nfc";
 +
 +  private static final int TIMEOUT_MS = 5000;
++  private static final int CONNECT_RETRIES = 3;
 +  private static final int MAX_SHORT_DATA = 255;
 +  private static final byte INS_GETRESPONSE = (byte) 0xC0;
 +
@@ -518,19 +519,31 @@ index 0000000000..14e6a628df
 +
 +  private IsoDep mIsoDep;
 +
-+  /** Binds {@code tag}. Returns false if the tag does not support IsoDep or connect fails. */
++  /**
++   * Binds {@code tag}. Returns false if the tag does not support IsoDep or connect fails.
++   * The first connect attempt on many phones transiently fails right after tag detection
++   * (the NFCC is still settling the route); retry a few times before giving up.
++   */
 +  public boolean bindTag(final Tag tag) {
 +    final IsoDep dep = IsoDep.get(tag);
 +    if (dep == null) {
 +      return false;
 +    }
-+    try {
-+      dep.connect();
-+      mIsoDep = dep;
-+      return true;
-+    } catch (final Exception e) {
-+      return false;
++    for (int attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
++      try {
++        dep.connect();
++        mIsoDep = dep;
++        return true;
++      } catch (final Exception e) {
++        try {
++          Thread.sleep(100L);
++        } catch (final InterruptedException ie) {
++          Thread.currentThread().interrupt();
++          return false;
++        }
++      }
 +    }
++    return false;
 +  }
 +
 +  public void release() {
@@ -748,10 +761,10 @@ index 0000000000..14e6a628df
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
-index 0000000000..9d778171e9
+index 0000000000..e144b91308
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
-@@ -0,0 +1,570 @@
+@@ -0,0 +1,615 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -800,7 +813,12 @@ index 0000000000..9d778171e9
 +
 +  static final String TAG = "GeckoCtap2Usb";
 +
-+  // CTAPHID commands (spec 8.1.9).
++  // CTAPHID commands (spec 8.1.9). The TYPE bit (0x80) marks an INITIATOR (first)
++  // packet: spec 8.1.9.1 "the command byte has always the highest bit set". Without
++  // it the device reads every packet as a continuation and stays silent — that was
++  // the CTAPHID_INIT timeout on real YubiKeys. The device sets the same bit on its
++  // first response packets, so responses are read through {@link #cmdOf}.
++  private static final byte INITIATOR_BIT = (byte) 0x80;
 +  private static final byte CMD_CBOR = (byte) 0x10;
 +  private static final byte CMD_INIT = (byte) 0x06;
 +  private static final byte CMD_KEEPALIVE = (byte) 0x3B;
@@ -1054,12 +1072,12 @@ index 0000000000..9d778171e9
 +    final byte[] nonce = new byte[NONCE_SIZE];
 +    new SecureRandom().nextBytes(nonce);
 +    final ByteBuffer packet = newOutPacket();
-+    packet.putInt(BROADCAST_CID);
-+    packet.put(CMD_INIT);
-+    putBcnt(packet, nonce.length);
++    putFirstPacketHeader(packet, BROADCAST_CID, CMD_INIT, nonce.length);
 +    packet.put(nonce);
 +
-+    final byte[] resp = transact(packet, CMD_INIT, BROADCAST_CID);
++    // expectedCid null: the INIT response carries the NEWLY ALLOCATED channel id, not
++    // the broadcast CID; the nonce echo below is the freshness guard.
++    final byte[] resp = transact(packet, CMD_INIT, null);
 +    if (resp == null || resp.length < INIT_RESPONSE_SIZE) {
 +      return false;
 +    }
@@ -1127,12 +1145,11 @@ index 0000000000..9d778171e9
 +    while (true) {
 +      final int chunk = Math.min(perPacket, total - offset);
 +      final ByteBuffer packet = newOutPacket();
-+      packet.putInt(mChannel);
 +      if (packetIndex == 0) {
-+        packet.put(cmd);
-+        putBcnt(packet, total);
++        putFirstPacketHeader(packet, mChannel, cmd, total);
 +      } else {
-+        packet.put((byte) packetIndex); // SEQ, 0-based continuation index
++        packet.putInt(mChannel);
++        packet.put((byte) (packetIndex - 1)); // SEQ: first continuation is 0 (spec 8.1.9.1)
 +      }
 +      if (chunk > 0) {
 +        packet.put(data, offset, chunk);
@@ -1153,13 +1170,13 @@ index 0000000000..9d778171e9
 +      if (resp == null) {
 +        return null;
 +      }
-+      final byte cmdByte = resp.get(4);
++      final byte cmdByte = cmdOf(resp);
 +      final int len = bcntOf(resp);
 +      if (cmdByte == CMD_KEEPALIVE) {
 +        continue; // processing / user-presence indicator
 +      }
 +      if (cmdByte == CMD_ERROR) {
-+        final int code = len >= 1 ? resp.get(5) & 0xFF : -1;
++        final int code = len >= 1 ? resp.get(FIRST_PAYLOAD_OFFSET) & 0xFF : -1;
 +        throw new Ctap2Error("USB CTAPHID error 0x" + Integer.toHexString(code).toUpperCase());
 +      }
 +      if (cidOf(resp) != mChannel) {
@@ -1168,12 +1185,19 @@ index 0000000000..9d778171e9
 +      if (len < 1) {
 +        return null;
 +      }
-+      final int take = Math.min(len, resp.remaining() - 5);
-+      final byte[] bytes = new byte[take];
-+      resp.position(5);
-+      resp.get(bytes);
-+      resp.position(0);
-+      body.write(bytes, 0, bytes.length);
++      readPayloadInto(body, resp, len, FIRST_PAYLOAD_OFFSET);
++      int nextSeq = 0;
++      while (body.size() < len) {
++        final ByteBuffer cont = waitForIn();
++        if (cont == null) {
++          return null;
++        }
++        if (cidOf(cont) != mChannel || (cont.get(4) & 0xFF) != (nextSeq & 0xFF)) {
++          continue; // foreign or out-of-order continuation; keep waiting
++        }
++        readPayloadInto(body, cont, len - body.size(), CONT_PAYLOAD_OFFSET);
++        nextSeq++;
++      }
 +      return body.toByteArray();
 +    }
 +  }
@@ -1182,7 +1206,7 @@ index 0000000000..9d778171e9
 +   * Sends {@code packet} and returns the payload of the next non-keepalive response matching
 +   * {@code expectedCmd} on {@code expectedCid}, or null on failure. Used for INIT.
 +   */
-+  private byte[] transact(final ByteBuffer packet, final byte expectedCmd, final int expectedCid) {
++  private byte[] transact(final ByteBuffer packet, final byte expectedCmd, final Integer expectedCid) {
 +    if (!sendOut(packet)) {
 +      return null;
 +    }
@@ -1191,25 +1215,28 @@ index 0000000000..9d778171e9
 +      if (resp == null) {
 +        return null;
 +      }
-+      final byte cmdByte = resp.get(4);
++      final byte cmdByte = cmdOf(resp);
 +      final int len = bcntOf(resp);
 +      if (cmdByte == CMD_KEEPALIVE) {
 +        continue;
 +      }
 +      if (cmdByte == CMD_ERROR) {
-+        final int code = len >= 1 ? resp.get(5) & 0xFF : -1;
++        final int code = len >= 1 ? resp.get(FIRST_PAYLOAD_OFFSET) & 0xFF : -1;
 +        throw new Ctap2Error("USB CTAPHID error 0x" + Integer.toHexString(code).toUpperCase());
 +      }
-+      if (cmdByte != expectedCmd || cidOf(resp) != expectedCid) {
++      if (cmdByte != expectedCmd) {
++        continue;
++      }
++      if (expectedCid != null && cidOf(resp) != expectedCid) {
 +        continue;
 +      }
 +      if (len < 1) {
 +        return null;
 +      }
-+      final int take = Math.min(len, resp.remaining() - 5);
++      final int take = Math.min(len, resp.remaining() - FIRST_PAYLOAD_OFFSET);
 +      final byte[] out = new byte[take];
 +      for (int i = 0; i < take; i++) {
-+        out[i] = resp.get(5 + i);
++        out[i] = resp.get(FIRST_PAYLOAD_OFFSET + i);
 +      }
 +      return out;
 +    }
@@ -1300,6 +1327,37 @@ index 0000000000..9d778171e9
 +    return mOutBuffer;
 +  }
 +
++  /** Writes the 7-byte header of an initiator (first) packet: CID, CMD|TYPE, BCNT. */
++  static void putFirstPacketHeader(
++      final ByteBuffer p, final int cid, final byte cmd, final int len) {
++    p.putInt(cid);
++    p.put((byte) (cmd | INITIATOR_BIT));
++    putBcnt(p, len);
++  }
++
++  static final int FIRST_PAYLOAD_OFFSET = 7; // CID(4) CMD(1) BCNT(2)
++  static final int CONT_PAYLOAD_OFFSET = 5; // CID(4) SEQ(1)
++
++  /** Command byte of a response packet with the TYPE bit masked off. */
++  static byte cmdOf(final ByteBuffer p) {
++    return (byte) (p.get(4) & 0x7F);
++  }
++
++  /**
++   * Copies up to {@code want} payload bytes of a report into {@code body}. Payload offset:
++   * 7 for a first/initiator packet (CID 0-3, CMD 4, BCNT 5-6), 5 for a continuation packet
++   * (CID 0-3, SEQ 4, no BCNT). Spec 8.1.9.1.
++   */
++  static void readPayloadInto(
++      final ByteArrayOutputStream body, final ByteBuffer report, final int want, final int offset) {
++    final int take = Math.min(want, report.remaining() - offset);
++    final byte[] bytes = new byte[take];
++    report.position(offset);
++    report.get(bytes);
++    report.position(0);
++    body.write(bytes, 0, bytes.length);
++  }
++
 +  private static int cidOf(final ByteBuffer p) {
 +    p.mark();
 +    final int cid = p.getInt();
@@ -1324,10 +1382,10 @@ index 0000000000..9d778171e9
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..264e67ac0e
+index 0000000000..7bcdf7f576
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,860 @@
+@@ -0,0 +1,870 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1642,7 +1700,17 @@ index 0000000000..264e67ac0e
 +
 +  /** Main thread: an NFC tag was tapped — USB must not start a second flow. */
 +  private static void onTag(final FlowState flow, final Tag tag) {
-+    if (flow.settled.get() || !flow.transportClaimed.compareAndSet(false, true)) {
++    if (flow.settled.get() || flow.transportClaimed.get()) {
++      return;
++    }
++    // Validate BEFORE claiming: a non-IsoDep tap (transit card, badge, misread) must leave
++    // the flow armed so the user can just tap the security key again. Claiming first made
++    // any stray tag permanently kill the attempt.
++    if (android.nfc.tech.IsoDep.get(tag) == null) {
++      Log.i(LOGTAG, "tapped tag is not IsoDep-capable; still waiting for a security key");
++      return;
++    }
++    if (!flow.transportClaimed.compareAndSet(false, true)) {
 +      return;
 +    }
 +    // Claim the flow before tearing the arm down: nothing else can win now.
@@ -3219,6 +3287,137 @@ index 0000000000..1c5bb53dbe
 +      fail("expected IllegalStateException");
 +    } catch (final IllegalStateException e) {
 +      // expected
++    }
++  }
++}
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
+new file mode 100644
+index 0000000000..19e6cba433
+--- /dev/null
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
+@@ -0,0 +1,125 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++package org.mozilla.gecko.ctap2;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++
++import java.io.ByteArrayOutputStream;
++import java.nio.ByteBuffer;
++import org.junit.Test;
++
++/**
++ * Wire-format tests for the CTAPHID framing helpers — the exact logic that broke on real
++ * YubiKeys: the initiator (first) packet must carry the TYPE bit (0x80) on its command byte
++ * (spec 8.1.9.1: "the command byte has always the highest bit set"), otherwise the device
++ * treats every packet as a continuation and never answers CTAPHID_INIT.
++ */
++public class UsbCtap2FramingTest {
++
++  private static ByteBuffer report(final int cid, final int cmdByte, final int bcnt, final byte[] payload) {
++    final ByteBuffer p = ByteBuffer.allocate(64);
++    p.putInt(cid);
++    p.put((byte) cmdByte);
++    p.put((byte) (bcnt >> 8));
++    p.put((byte) (bcnt & 0xFF));
++    p.put(payload);
++    p.rewind();
++    return p;
++  }
++
++  @Test
++  public void initHeaderCarriesInitiatorBit() {
++    final ByteBuffer p = ByteBuffer.allocate(64);
++    UsbCtap2Transport.putFirstPacketHeader(p, 0xFFFFFFFF, (byte) 0x06, 8);
++    p.rewind();
++    assertEquals(0xFFFFFFFF, p.getInt());
++    assertEquals((byte) 0x86, p.get()); // INIT 0x06 | TYPE 0x80 on the wire
++    assertEquals(0, p.get()); // BCNT hi
++    assertEquals(8, p.get()); // BCNT lo
++  }
++
++  @Test
++  public void cborHeaderCarriesInitiatorBit() {
++    final ByteBuffer p = ByteBuffer.allocate(64);
++    UsbCtap2Transport.putFirstPacketHeader(p, 0x12345678, (byte) 0x10, 300);
++    p.rewind();
++    assertEquals(0x12345678, p.getInt());
++    assertEquals((byte) 0x90, p.get()); // CBOR 0x10 | TYPE 0x80
++    assertEquals(1, p.get()); // BCNT hi = 300 >> 8
++    assertEquals(44, p.get()); // BCNT lo = 300 & 0xFF
++  }
++
++  @Test
++  public void responseCommandByteMasksTypeBit() {
++    // Device first response packets set the same bit: INIT reply arrives as 0x86, CBOR reply
++    // as 0x90, keepalive as 0xBB, error as 0xBF. cmdOf must normalize all of them.
++    assertEquals((byte) 0x06, UsbCtap2Transport.cmdOf(report(1, 0x86, 17, new byte[17])));
++    assertEquals((byte) 0x10, UsbCtap2Transport.cmdOf(report(1, 0x90, 3, new byte[3])));
++    assertEquals((byte) 0x3B, UsbCtap2Transport.cmdOf(report(1, 0xBB, 1, new byte[1])));
++    assertEquals((byte) 0x3F, UsbCtap2Transport.cmdOf(report(1, 0xBF, 1, new byte[1])));
++  }
++
++  @Test
++  public void firstPacketPayloadStartsAtOffsetSeven() {
++    // CID(4) CMD(1) BCNT(2) then payload.
++    final byte[] payload = {1, 2, 3, 4};
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    UsbCtap2Transport.readPayloadInto(body, report(1, 0x90, 4, payload), 4, 7);
++    assertArrayEquals(payload, body.toByteArray());
++  }
++
++  @Test
++  public void continuationPayloadStartsAtOffsetFive() {
++    // CID(4) SEQ(1) then payload — no BCNT field on continuations.
++    final byte[] payload = {9, 8, 7};
++    final ByteBuffer cont = ByteBuffer.allocate(64);
++    cont.putInt(1);
++    cont.put((byte) 0); // SEQ 0 = first continuation
++    cont.put(payload);
++    cont.rewind();
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    UsbCtap2Transport.readPayloadInto(body, cont, 3, 5);
++    assertArrayEquals(payload, body.toByteArray());
++  }
++
++  @Test
++  public void payloadReadClampsToWant() {
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    UsbCtap2Transport.readPayloadInto(body, report(1, 0x90, 100, new byte[57]), 3, 7);
++    assertEquals(3, body.toByteArray().length);
++  }
++
++  @Test
++  public void continuationReassemblyMatchesBcnt() {
++    // A 100-byte CBOR response: first report carries 57 payload bytes, the continuation
++    // (SEQ 0) carries the remaining 43. Mirrors the transactMessage reassembly loop.
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    final byte[] first = new byte[57];
++    final byte[] cont = new byte[43];
++    for (int i = 0; i < 57; i++) {
++      first[i] = (byte) i;
++    }
++    for (int i = 0; i < 43; i++) {
++      cont[i] = (byte) (57 + i);
++    }
++    UsbCtap2Transport.readPayloadInto(body, report(1, 0x90, 100, first), 100, 7);
++    int nextSeq = 0;
++    while (body.size() < 100) {
++      final ByteBuffer c = ByteBuffer.allocate(64);
++      c.putInt(1);
++      c.put((byte) nextSeq);
++      c.put(cont);
++      c.rewind();
++      UsbCtap2Transport.readPayloadInto(body, c, 100 - body.size(), 5);
++      nextSeq++;
++    }
++    assertEquals(100, body.size());
++    for (int i = 0; i < 100; i++) {
++      assertEquals((byte) i, body.toByteArray()[i]);
 +    }
 +  }
 +}
