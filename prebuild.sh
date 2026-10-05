@@ -206,8 +206,12 @@ localize_maven
 # 157.0.0 name and any -h<N> variant.
 AC_BASE=${1%%-h[0-9]*}
 echo "mozilla.version=${AC_BASE%.0}" >> local.properties
-# Set A-S version
-echo 'as.version=157.0' >> local.properties
+# Set A-S version. Must match what the A-S stage publishes to ~/.m2, which
+# is the VERSION of the pinned application-services tag (version.txt:
+# v155.0 -> 155.0, v157.0.1 -> 157.0.1). Read it from the checkout so a
+# patch-level pin (x.y.z) can never desync from this line again.
+AS_VERSION=$(cat "$application_services/version.txt")
+echo "as.version=$AS_VERSION" >> local.properties
 popd
 
 #
