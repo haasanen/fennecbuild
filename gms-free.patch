@@ -347,7 +347,7 @@ index 7b440fb3c9..5d782a44e0 100644
  import org.junit.Rule
  import org.junit.Test
  import org.junit.runner.RunWith
-@@ -40,90 +24,76 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
+@@ -40,90 +24,75 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
  import org.mozilla.fenix.components.ReviewPromptAttemptResult.Unknown
  import org.mozilla.fenix.helpers.FenixGleanTestRule
  import org.robolectric.RobolectricTestRunner
@@ -423,8 +423,8 @@ index 7b440fb3c9..5d782a44e0 100644
              }
          }
 -        assertFalse(reviewManager.promptHasBeenRequested)
-     }
- 
+-    }
+
      @Test
 -    fun `WHEN the reviews API fails THEN returns Error result`() = runTest {
 -        val controller =
