@@ -726,17 +726,17 @@ diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components
 index d291c89898..fcd82a79c5 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ClientUUID.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ClientUUID.kt
-@@ -7,9 +7,6 @@ package org.mozilla.fenix.components
+@@ -7,9 +7,8 @@ package org.mozilla.fenix.components
  import android.content.Context
  import android.content.SharedPreferences
  import androidx.core.content.edit
--import java.security.MessageDigest
--import java.util.UUID
+ import java.security.MessageDigest
+ import java.util.UUID
 -import mozilla.components.lib.integrity.googleplay.RequestHashProvider
  import mozilla.components.lib.llm.mlpa.UserIdProvider
  import mozilla.components.lib.llm.mlpa.service.UserId
  import mozilla.components.support.ktx.kotlin.toHexString
-@@ -34,10 +31,13 @@ fun interface Hasher {
+@@ -34,10 +33,13 @@ fun interface Hasher {
  }
  
  /**
@@ -816,23 +816,23 @@ diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components
 index 73a80dd959..5c1fa6763d 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/PlayStoreReviewPromptController.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/PlayStoreReviewPromptController.kt
-@@ -9,15 +9,8 @@ import android.content.ActivityNotFoundException
+@@ -9,15 +9,11 @@ import android.content.ActivityNotFoundException
  import android.content.Intent
  import androidx.annotation.VisibleForTesting
  import androidx.core.net.toUri
 -import com.google.android.play.core.review.ReviewException
 -import com.google.android.play.core.review.ReviewInfo
 -import com.google.android.play.core.review.ReviewManager
--import java.text.SimpleDateFormat
--import java.util.Date
--import java.util.Locale
+ import java.text.SimpleDateFormat
+ import java.util.Date
+ import java.util.Locale
  import kotlinx.coroutines.CancellationException
  import kotlinx.coroutines.Dispatchers
 -import kotlinx.coroutines.tasks.await
  import kotlinx.coroutines.withContext
  import mozilla.components.support.base.log.logger.Logger
  import org.mozilla.fenix.GleanMetrics.ReviewPrompt
-@@ -31,52 +24,13 @@ val logger = Logger("PlayStoreReviewPromptController")
+@@ -31,52 +27,13 @@ val logger = Logger("PlayStoreReviewPromptController")
  
  /** Wraps the Play Store In-App Review API. */
  class PlayStoreReviewPromptController(
@@ -886,7 +886,7 @@ index 73a80dd959..5c1fa6763d 100644
  
          return result
      }
-@@ -86,20 +40,6 @@ class PlayStoreReviewPromptController(
+@@ -86,20 +43,6 @@ class PlayStoreReviewPromptController(
          activity: Activity,
          openInNewTab: (url: String) -> Unit,
      ) {
