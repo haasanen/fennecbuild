@@ -340,6 +340,13 @@ apply_patch "$patches/gecko-release-artifacts.patch"
 # Remove unneeded GeckoView Gradle tasks
 apply_patch "$patches/gecko-remove-irrelevant-gradle-tasks.patch"
 
+# Residual 157-rebase hunks that no other patch carries: the
+# org.ironfoxoss.unifiedpush dependency in feature/push/build.gradle and the
+# enableUnifiedPush/useUnifiedPush Settings.kt properties. Last in the chain
+# (same position as the verified e2e157 order; Settings.kt hunks must apply
+# after fenix-liberate + fenix-disable-sent-from-fx).
+apply_patch "$patches/fork-rebase-157-hunks.patch"
+
 # Fail in ~2s if a GMS/microG import reappeared in the mobile android
 # sources (the failure class that cost runs #1-#7 2.5h each to surface at
 # a gradle compile stage). Checks the fully patched tree.
