@@ -157,7 +157,12 @@ jobs:
           gclone https://gitlab.com/ironfox-oss/unifiedpush-ac 1.0.6 "$SIB/srclib/UnifiedPushAC"
           echo "=== wasi-sdk @ wasi-sdk-20 (+submodules)"
           gclone https://github.com/WebAssembly/wasi-sdk wasi-sdk-20 "$SIB/srclib/wasi-sdk"
-          (cd "$SIB/srclib/wasi-sdk" && git submodule update --init --depth 1)
+          # Only the two GitHub submodules are needed: the build targets are
+          # build/wasi-libc.BUILT + build/libcxx.BUILT (see build-wasi.sh); the
+          # src/config submodule (git.savannah.gnu.org) feeds ONLY the
+          # build/config.BUILT target we never invoke. Savannah has caused
+          # repeated clone flakes (HTTP 500 / connect timeouts) — skip it.
+          (cd "$SIB/srclib/wasi-sdk" && git submodule update --init --depth 1 src/llvm-project src/wasi-libc)
           df -h /
           echo "=== llvm @ 3b5e7c83 (llvm-project commit)"
           git init "$SIB/srclib/llvm"
