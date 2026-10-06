@@ -117,13 +117,12 @@ diff --git a/mobile/android/android-components/components/feature/accounts-push/
 index f0daa1c910..eeb992cd56 100644
 --- a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
 +++ b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
-@@ -13,7 +13,8 @@ import kotlinx.coroutines.withContext
+@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
  import mozilla.components.feature.accounts.push.FxaPushSupportFeature
  import mozilla.components.feature.accounts.push.PREF_FXA_SCOPE
  import mozilla.components.feature.accounts.push.preference
 -import mozilla.components.feature.push.PushScope
 +import org.ironfoxoss.unifiedpush.PushScope
-+import java.util.UUID
  
  /** An implementation of a [ScopeProperty] that generates and stores a scope in [SharedPreferences]. */
  internal class PushScopeProperty(
