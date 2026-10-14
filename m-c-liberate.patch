@@ -1,5 +1,5 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 4ef9dc15fd..2fce57b3c0 100644
+index db7d6a1f5a..315a700eb2 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
 @@ -55,17 +55,10 @@ work = "2.11.2"

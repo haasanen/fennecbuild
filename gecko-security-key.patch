@@ -1,5 +1,5 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 2fce57b3c0..7ff1b392bb 100644
+index 315a700eb2..3cb5cc1a44 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
 @@ -3,6 +3,10 @@
@@ -22,10 +22,10 @@ index 2fce57b3c0..7ff1b392bb 100644
  ksp-symbol-processing-aa = { module = "com.google.devtools.ksp:symbol-processing-aa", version.ref = "ksp" }
  ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "ksp" }
 diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
-index 79cace68f5..71adba1b96 100644
+index 45e11ce1c8..93e4915f7d 100644
 --- a/mobile/android/geckoview/build.gradle
 +++ b/mobile/android/geckoview/build.gradle
-@@ -194,7 +194,7 @@ dependencies {
+@@ -195,7 +195,7 @@ dependencies {
      implementation libs.androidx.core
      implementation libs.androidx.lifecycle.common
      implementation libs.androidx.lifecycle.process

@@ -1,8 +1,8 @@
 diff --git a/build/moz.configure/toolchain.configure b/build/moz.configure/toolchain.configure
-index d58f3eb65c..9c15c0038e 100644
+index fad2010467..f034b2fc7c 100644
 --- a/build/moz.configure/toolchain.configure
 +++ b/build/moz.configure/toolchain.configure
-@@ -1646,9 +1646,9 @@ def compiler(
+@@ -1644,9 +1644,9 @@ def compiler(
          # This version can be no higher than the version used in
          # src/bootstrap/src/core/build_steps/llvm.rs's check_llvm_version in the source
          # code of the minimum supported Rust version.

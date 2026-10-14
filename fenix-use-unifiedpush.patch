@@ -1,8 +1,8 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Components.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Components.kt
-index cf119e3613..708d061797 100644
+index cb136b02d1..da28321e68 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Components.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Components.kt
-@@ -260,7 +260,7 @@ class Components(
+@@ -264,7 +264,7 @@ class Components(
      val publicSuffixList by lazyMonitored { PublicSuffixList(context) }
      val clipboardHandler by lazyMonitored { ClipboardHandler(context) }
      val performance by lazyMonitored { PerformanceComponent() }
@@ -12,10 +12,10 @@ index cf119e3613..708d061797 100644
  
      val strictMode by lazyMonitored {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
-index 464f8d4279..4f08eeba3f 100644
+index dcd07163cc..0ccc39b67a 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
-@@ -30,7 +30,7 @@ class Push(val context: Context, val strictMode: StrictModeManager = context.com
+@@ -31,7 +31,7 @@ class Push(val context: Context, val strictMode: StrictModeManager = context.com
      private val logger = Logger("Push")
      val feature: Pusher?
          get() = strictMode.allowViolation(StrictMode::allowThreadDiskReads) {
@@ -24,7 +24,7 @@ index 464f8d4279..4f08eeba3f 100644
                  unifiedPushFeature.also { feature ->
                      if (feature.isAvailable(context)) {
                          logger.info("Using UnifiedPush")
-@@ -49,7 +49,7 @@ class Push(val context: Context, val strictMode: StrictModeManager = context.com
+@@ -50,7 +50,7 @@ class Push(val context: Context, val strictMode: StrictModeManager = context.com
                              notificationId = notificationId,
                              notification = notification
                          )
@@ -34,7 +34,7 @@ index 464f8d4279..4f08eeba3f 100644
                  }
              } else {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-index 4c45e3bee5..5d6d6506e9 100644
+index 4d1cab21cd..05fa4e00c1 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
 @@ -170,6 +170,12 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
@@ -130,10 +130,10 @@ index 6698ce1433..a8b1e47c8e 100644
                  showSecretDebugMenuThisSession
              findPreference<Preference>(getPreferenceKey(R.string.pref_key_debug_settings))?.isVisible =
 diff --git a/mobile/android/fenix/app/src/main/res/values/preference_keys.xml b/mobile/android/fenix/app/src/main/res/values/preference_keys.xml
-index 6dff1ff08e..2e98c9cd5d 100644
+index da972b524f..8175e37335 100644
 --- a/mobile/android/fenix/app/src/main/res/values/preference_keys.xml
 +++ b/mobile/android/fenix/app/src/main/res/values/preference_keys.xml
-@@ -467,6 +467,8 @@
+@@ -470,6 +470,8 @@
      <string name="pref_key_deleted_legacy_pocket_database" translatable="false">pref_key_deleted_legacy_pocket_database</string>
  
      <!-- Secret Info Setting Keys -->
@@ -143,7 +143,7 @@ index 6dff1ff08e..2e98c9cd5d 100644
  
      <!-- Secret Settings -->
 diff --git a/mobile/android/fenix/app/src/main/res/values/static_strings.xml b/mobile/android/fenix/app/src/main/res/values/static_strings.xml
-index 5dcc6f45ae..91e71828aa 100644
+index 9ad318172b..11ad5360a6 100644
 --- a/mobile/android/fenix/app/src/main/res/values/static_strings.xml
 +++ b/mobile/android/fenix/app/src/main/res/values/static_strings.xml
 @@ -70,6 +70,8 @@
@@ -156,10 +156,10 @@ index 5dcc6f45ae..91e71828aa 100644
      <string name="preferences_debug_settings_custom_glean_server_url" translatable="false">Custom Glean server URL (requires restart)</string>
      <!-- Title of preference for sync debugging (only shown in the when the secret debug menu is enabled) -->
 diff --git a/mobile/android/fenix/app/src/main/res/values/strings.xml b/mobile/android/fenix/app/src/main/res/values/strings.xml
-index e279f53a62..4a948075a9 100644
+index 912da646cd..f8dd06a8e8 100644
 --- a/mobile/android/fenix/app/src/main/res/values/strings.xml
 +++ b/mobile/android/fenix/app/src/main/res/values/strings.xml
-@@ -886,6 +886,13 @@
+@@ -894,6 +894,13 @@
      <!-- Message to indicate users that we are quitting the application to apply the changes -->
      <string name="quit_application">Quitting the application to apply changes…</string>
  
@@ -192,10 +192,10 @@ index 148e9df393..fb1ba2d6e5 100644
              android:key="@string/pref_key_leakcanary"
              android:title="@string/preference_leakcanary"
 diff --git a/mobile/android/fenix/app/src/main/res/xml/secret_settings_preferences.xml b/mobile/android/fenix/app/src/main/res/xml/secret_settings_preferences.xml
-index 7212f7da11..fcba5c934d 100644
+index b07998e8ad..4e99daf8e4 100644
 --- a/mobile/android/fenix/app/src/main/res/xml/secret_settings_preferences.xml
 +++ b/mobile/android/fenix/app/src/main/res/xml/secret_settings_preferences.xml
-@@ -209,6 +209,11 @@
+@@ -223,6 +223,11 @@
        android:key="@string/pref_key_nimbus_use_preview"
        android:title="@string/preferences_nimbus_use_preview_collection"
        app:iconSpaceReserved="false" />

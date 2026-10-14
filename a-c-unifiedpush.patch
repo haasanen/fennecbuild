@@ -114,7 +114,7 @@ index 5381243b4c..a54848f158 100644
  
      override fun onMessageReceived(scope: String, message: ByteArray?) {
 diff --git a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
-index f0daa1c910..eeb992cd56 100644
+index f0daa1c910..089549552f 100644
 --- a/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
 +++ b/mobile/android/android-components/components/feature/accounts-push/src/main/java/mozilla/components/feature/accounts/push/cache/PushScopeProperty.kt
 @@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext

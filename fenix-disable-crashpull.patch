@@ -43,10 +43,10 @@ index 1edcf54eeb..35c08d474b 100644
                      FxNimbus.features.sameDocumentNavigationOverridesLoadType.value().enabled
                  )
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-index 5485655fa5..4c45e3bee5 100644
+index c20a6d526c..4d1cab21cd 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SecretSettingsFragment.kt
-@@ -429,7 +429,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
+@@ -418,7 +418,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
          }
  
          requirePreference<SwitchPreferenceCompat>(R.string.pref_key_crash_pull_never_show_again).apply {
@@ -56,12 +56,12 @@ index 5485655fa5..4c45e3bee5 100644
              onPreferenceChangeListener = SharedPreferenceUpdater()
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 4dc8ee307d..eb3071e394 100644
+index 1155a5c86d..e173ce8111 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-@@ -686,11 +686,7 @@ class Settings(
- 
-     val isCrashReportingEnabled: Boolean = false
+@@ -693,11 +693,7 @@ class Settings(
+             default = false,
+         )
  
 -    var crashReportChoice by
 -        stringPreference(
@@ -72,7 +72,7 @@ index 4dc8ee307d..eb3071e394 100644
  
      val isRemoteDebuggingEnabled by
          booleanPreference(
-@@ -1121,11 +1117,7 @@ class Settings(
+@@ -1128,11 +1124,7 @@ class Settings(
          )
  
      /** Indicates if the user denies to ever see again the Remote Settings crash pull UI. */

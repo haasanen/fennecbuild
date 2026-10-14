@@ -1,8 +1,8 @@
 diff --git a/mobile/android/fenix/app/build.gradle b/mobile/android/fenix/app/build.gradle
-index 2848013545..9576a39237 100644
+index fd141eca9d..8c92400025 100644
 --- a/mobile/android/fenix/app/build.gradle
 +++ b/mobile/android/fenix/app/build.gradle
-@@ -687,6 +687,7 @@ dependencies {
+@@ -690,6 +690,7 @@ dependencies {
      androidTestUtil libs.androidx.test.orchestrator
  
      lintChecks project(':components:tooling-lint')
@@ -11,7 +11,7 @@ index 2848013545..9576a39237 100644
  
  protobuf {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
-index 35903275d6..fe9a60d234 100644
+index 93d8d6d7de..ad8f95dfe1 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/FenixApplication.kt
 @@ -53,7 +53,7 @@ import mozilla.components.concept.ai.controls.isEnabled
@@ -23,7 +23,7 @@ index 35903275d6..fe9a60d234 100644
  import mozilla.components.concept.storage.FrecencyThresholdOption
  import mozilla.components.feature.addons.migration.DefaultSupportedAddonsChecker
  import mozilla.components.feature.addons.update.GlobalAddonDependencyProvider
-@@ -691,7 +691,7 @@ open class FenixApplication : Application(), Provider, ThemeProvider {
+@@ -693,7 +693,7 @@ open class FenixApplication : Application(), Provider, ThemeProvider {
              logger.info("AutoPushFeature is configured, initializing it...")
  
              // Install the AutoPush singleton to receive messages.
@@ -33,10 +33,10 @@ index 35903275d6..fe9a60d234 100644
              WebPushEngineIntegration(components.core.engine, it).start()
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
-index dd11013b62..464f8d4279 100644
+index 640d6d3325..dcd07163cc 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Push.kt
-@@ -9,7 +9,13 @@ import androidx.core.net.toUri
+@@ -10,7 +10,13 @@ import androidx.core.net.toUri
  import mozilla.components.feature.push.AutoPushFeature
  import mozilla.components.feature.push.Protocol
  import mozilla.components.feature.push.PushConfig
@@ -51,7 +51,7 @@ index dd11013b62..464f8d4279 100644
  import mozilla.components.support.base.log.logger.Logger
  import org.mozilla.fenix.R
  import org.mozilla.fenix.ext.components
-@@ -20,18 +26,68 @@ import org.mozilla.fenix.push.FirebasePushService
+@@ -21,18 +27,68 @@ import org.mozilla.fenix.push.FirebasePushService
   * Component group for push services. These components use services that strongly depend on push messaging (e.g.
   * WebPush, SendTab).
   */

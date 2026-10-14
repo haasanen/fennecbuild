@@ -1,5 +1,5 @@
 diff --git a/build.gradle b/build.gradle
-index 3183b33a31..8feae4d5fb 100644
+index f993dc423d..93a7f817a1 100644
 --- a/build.gradle
 +++ b/build.gradle
 @@ -5,14 +5,9 @@ import org.tomlj.TomlTable

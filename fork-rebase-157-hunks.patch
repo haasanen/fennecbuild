@@ -11,10 +11,10 @@ index c006aa5a39..b2d0d92e78 100644
      implementation project(':components:support-base')
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 0f7d094c30..4dc8ee307d 100644
+index b145fa0665..c0b88d7b96 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-@@ -2407,6 +2407,20 @@ class Settings(
+@@ -2425,6 +2425,20 @@ class Settings(
              default = { FxNimbus.features.remoteSearchConfiguration.value().enabled },
          )
  

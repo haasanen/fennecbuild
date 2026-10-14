@@ -67,7 +67,7 @@ run_stage() {
 # the same thing when nothing changed.
 M2="$HOME/.m2/repository"
 
-glean_published() {  # $1 = version dir (68.0.1 for glean, 68.0.0 for glean_as)
+glean_published() {  # $1 = version dir (70.2.0 for glean, 70.0.0 for glean_as)
     local V="$1"
     [ -f "$M2/org/mozilla/telemetry/glean/$V/glean-$V.aar" ] || return 1
     [ -f "$M2/org/mozilla/telemetry/glean-native/$V/glean-native-$V.aar" ] || return 1
@@ -92,8 +92,8 @@ fi
 fi
 
 if run_stage glean; then
-if glean_published 68.0.1; then
-    echo "glean: all artefacts already in ~/.m2 (68.0.1) — skipping build"
+if glean_published 70.2.0; then
+    echo "glean: all artefacts already in ~/.m2 (70.2.0) — skipping build"
 else
 pushd "$glean"
 export TARGET_CFLAGS=-DNDEBUG
@@ -103,8 +103,8 @@ fi
 fi
 
 if run_stage glean_as; then
-if glean_published 68.0.0; then
-    echo "glean_as: all artefacts already in ~/.m2 (68.0.0) — skipping build"
+if glean_published 70.0.0; then
+    echo "glean_as: all artefacts already in ~/.m2 (70.0.0) — skipping build"
 else
 pushd "$glean_as"
 # (inherits TARGET_CFLAGS from the glean stage; re-set so this stage is also

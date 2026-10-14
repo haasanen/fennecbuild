@@ -10,9 +10,9 @@
 #
 # Pinned versions observed in the repos this build uses:
 #   gmscore (v0.3.16.252432)      -> 8.13
-#   glean (v68.x)                 -> 8.14.3
-#   application-services (v157.0.1) -> 8.14.3
-#   in-tree geckoview/fenix       -> 9.7.0 (default)
+#   glean (v70.x)                 -> 8.14.3
+#   application-services (v158.0) -> 8.14.3
+#   in-tree geckoview/fenix       -> 9.7.1 (default)
 #
 # A single global 9.7.0 does NOT work: gmscore's Android Gradle Plugin
 # relies on org.gradle.api.problems.internal.InternalProblems, a Gradle
@@ -22,7 +22,7 @@ VROOT=/opt/gradle-versions
 PROP="$(pwd)/gradle/wrapper/gradle-wrapper.properties"
 V=""
 [ -f "$PROP" ] && V=$(sed -n 's/.*gradle-\([0-9][0-9.]*\)-[a-z]*\.zip/\1/p' "$PROP" | head -1)
-V="${V:-9.7.0}"
+V="${V:-9.7.1}"
 G="$VROOT/gradle-$V/bin/gradle"
 if [ ! -x "$G" ]; then
     echo "gradle wrapper: installing gradle-$V" >&2

@@ -78,7 +78,7 @@ index 0d74d70310..25ae585283 100644
          )
          assertIs<LoginExceptionsAdapter>(view.binding.exceptionsList.adapter)
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/home/pocket/ContentRecommendationsFeatureHelperTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/home/pocket/ContentRecommendationsFeatureHelperTest.kt
-index 596bf15973..5ffb6fdec0 100644
+index 874d89fcde..4c6776bdc6 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/home/pocket/ContentRecommendationsFeatureHelperTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/home/pocket/ContentRecommendationsFeatureHelperTest.kt
 @@ -37,7 +37,7 @@ class ContentRecommendationsFeatureHelperTest {
@@ -99,131 +99,15 @@ index 596bf15973..5ffb6fdec0 100644
      }
  
      @Test
-@@ -61,7 +61,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("fr").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -69,7 +69,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("fr").setRegion("FR").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
 @@ -77,7 +77,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("es").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
+         locales.forEach {
+             LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = Locale.forLanguageTag(it))
  
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
+-            assertTrue(it, ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
++            assertFalse(it, ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
+         }
      }
  
-     @Test
-@@ -85,7 +85,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("es").setRegion("ES").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -93,7 +93,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("it").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -101,7 +101,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("it").setRegion("IT").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -109,7 +109,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("en").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -117,7 +117,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("en").setRegion("CA").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -125,7 +125,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("en").setRegion("GB").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -133,7 +133,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("en").setRegion("US").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -141,7 +141,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("de").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -149,7 +149,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("de").setRegion("DE").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -157,7 +157,7 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("de").setRegion("AT").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- 
-     @Test
-@@ -165,6 +165,6 @@ class ContentRecommendationsFeatureHelperTest {
-         val locale = Locale.Builder().setLanguage("de").setRegion("CH").build()
-         LocaleManager.setNewLocale(testContext, localeUseCase = null, locale = locale)
- 
--        assertTrue(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-+        assertFalse(ContentRecommendationsFeatureHelper.isContentRecommendationsFeatureEnabled(testContext))
-     }
- }
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/onboarding/continuous/ContinuousOnboardingFeatureTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/onboarding/continuous/ContinuousOnboardingFeatureTest.kt
 index ccfb0b5111..cea120de44 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/onboarding/continuous/ContinuousOnboardingFeatureTest.kt
@@ -300,7 +184,7 @@ index 47d1e013f8..5aefd4e490 100644
              getTermsOfUsePromptContent(
                      testContext,
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/utils/SettingsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/utils/SettingsTest.kt
-index 9a8a93f7d2..e1f817c082 100644
+index ecb9dc8dea..df23fd5908 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/utils/SettingsTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/utils/SettingsTest.kt
 @@ -195,7 +195,8 @@ class SettingsTest {

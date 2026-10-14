@@ -1,5 +1,5 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 7ff1b392bb..2932eae92f 100644
+index 3cb5cc1a44..2f35be76e2 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
 @@ -110,7 +110,6 @@ jna = "5.19.1"
@@ -20,10 +20,10 @@ index 7ff1b392bb..2932eae92f 100644
  protobuf-javalite = { module = "com.google.protobuf:protobuf-javalite", version.ref = "protobuf" }
  
 diff --git a/mobile/android/android-components/.buildconfig.yml b/mobile/android/android-components/.buildconfig.yml
-index 97f42f801c..16576765f0 100644
+index 8012188758..6a13091dfc 100644
 --- a/mobile/android/android-components/.buildconfig.yml
 +++ b/mobile/android/android-components/.buildconfig.yml
-@@ -1204,7 +1204,6 @@ projects:
+@@ -1166,7 +1166,6 @@ projects:
      - components:feature-session
      - components:feature-tabs
      - components:lib-dataprotect
@@ -31,7 +31,7 @@ index 97f42f801c..16576765f0 100644
      - components:lib-publicsuffixlist
      - components:lib-state
      - components:service-firefox-accounts
-@@ -2134,18 +2133,6 @@ projects:
+@@ -2092,18 +2091,6 @@ projects:
      - components:support-test
      - components:tooling-fetch-tests
      - components:tooling-lint
@@ -224,10 +224,10 @@ index dec6a62a9c..0000000000
 -    }
 -}
 diff --git a/mobile/android/fenix/app/build.gradle b/mobile/android/fenix/app/build.gradle
-index 9a53616cce..b11d36ac24 100644
+index 0d27b7c697..cd5152be89 100644
 --- a/mobile/android/fenix/app/build.gradle
 +++ b/mobile/android/fenix/app/build.gradle
-@@ -600,7 +600,6 @@ dependencies {
+@@ -602,7 +602,6 @@ dependencies {
      implementation libs.kotlinx.coroutines
      implementation libs.kotlinx.serialization.json
      implementation libs.mozilla.glean
@@ -236,10 +236,10 @@ index 9a53616cce..b11d36ac24 100644
      implementation libs.sentry
      implementation libs.androidx.documentfile
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-index 3f246142ee..c2b79430b2 100644
+index 3f246142ee..98d8ddec3e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-@@ -10,9 +10,8 @@ import mozilla.components.browser.state.store.BrowserStore
+@@ -10,7 +10,6 @@ import mozilla.components.browser.state.store.BrowserStore
  import mozilla.components.concept.engine.Engine
  import mozilla.components.feature.ipprotection.IPProtectionFeature
  import mozilla.components.feature.ipprotection.IPProtectionStorageSynchronizer
@@ -247,8 +247,6 @@ index 3f246142ee..c2b79430b2 100644
  import mozilla.components.feature.ipprotection.store.DefaultIPProtectionLocationRepository
  import mozilla.components.feature.ipprotection.store.IPProtectionLocationMiddleware
  import mozilla.components.feature.ipprotection.store.IPProtectionStore
- import mozilla.components.service.fxa.manager.FxaAccountManager
- import mozilla.components.service.fxa.store.SyncStore
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
 index f4c2df1f76..55cb2b4a11 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
@@ -281,10 +279,10 @@ index f4c2df1f76..55cb2b4a11 100644
                  Logger.info("ActivationPing - generating ping with the hashed id")
                  // We have a valid, hashed Google Advertising ID.
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt
-index 3d9fbfa539..04fa41ade1 100644
+index e3aa556a68..b478e42067 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/MetricsUtils.kt
-@@ -6,13 +6,11 @@ package org.mozilla.fenix.components.metrics
+@@ -6,8 +6,6 @@ package org.mozilla.fenix.components.metrics
  
  import android.util.Base64
  import androidx.annotation.VisibleForTesting
@@ -293,11 +291,6 @@ index 3d9fbfa539..04fa41ade1 100644
  import java.io.IOException
  import java.security.NoSuchAlgorithmException
  import java.security.spec.InvalidKeySpecException
- import javax.crypto.SecretKeyFactory
- import javax.crypto.spec.PBEKeySpec
- import kotlinx.coroutines.Dispatchers
- import kotlinx.coroutines.withContext
- import mozilla.components.browser.state.search.SearchEngine
 @@ -172,12 +170,6 @@ object MetricsUtils {
      internal fun getAdvertisingID(retrieveAdvertisingIdInfo: () -> String?): String? {
          return try {
@@ -312,7 +305,7 @@ index 3d9fbfa539..04fa41ade1 100644
              // This is unlikely to happen, as this should be running off the main thread.
              Logger.debug("getAdvertisingID() - AdvertisingIdClient must be called off the main thread")
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-index 7b440fb3c9..5d782a44e0 100644
+index 7b440fb3c9..43a8b9c2c0 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
 @@ -5,31 +5,15 @@
@@ -424,7 +417,7 @@ index 7b440fb3c9..5d782a44e0 100644
          }
 -        assertFalse(reviewManager.promptHasBeenRequested)
 -    }
-
+ 
      @Test
 -    fun `WHEN the reviews API fails THEN returns Error result`() = runTest {
 -        val controller =
@@ -474,7 +467,7 @@ index 7b440fb3c9..5d782a44e0 100644
          assertEquals(Unknown, displayState)
      }
  
-@@ -131,6 +101,8 @@ class PlayStoreReviewPromptControllerTest {
+@@ -131,6 +100,8 @@ class PlayStoreReviewPromptControllerTest {
          return "ReviewInfo{pendingIntent=PendingIntent{5b613b1: android.os.BinderProxy@46c8096}, $optionalArg}"
      }
  
@@ -483,7 +476,7 @@ index 7b440fb3c9..5d782a44e0 100644
      @Test
      fun reviewPromptWasDisplayed() {
          testRecordReviewPromptEventRecordsTheExpectedData(Displayed, "true")
-@@ -178,83 +150,3 @@ class PlayStoreReviewPromptControllerTest {
+@@ -178,83 +149,3 @@ class PlayStoreReviewPromptControllerTest {
          }
      }
  }
@@ -568,10 +561,10 @@ index 7b440fb3c9..5d782a44e0 100644
 -    override fun addOnFailureListener(activity: Activity, listener: OnFailureListener): Task<T> = assertUnused()
 -}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
-index 2c9614dddf..b64a5a0144 100644
+index 2c9614dddf..a732221b81 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
-@@ -4,12 +4,7 @@
+@@ -4,11 +4,6 @@
  
  package org.mozilla.fenix.components.metrics
  
@@ -583,7 +576,6 @@ index 2c9614dddf..b64a5a0144 100644
  import java.io.IOException
  import kotlinx.coroutines.test.runTest
  import org.junit.Assert.assertArrayEquals
- import org.junit.Assert.assertEquals
 @@ -19,14 +14,15 @@ import org.junit.Test
  class MetricsUtilsTest {
  

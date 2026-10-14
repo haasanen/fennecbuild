@@ -1,8 +1,8 @@
 diff --git a/mobile/android/android-components/.buildconfig.yml b/mobile/android/android-components/.buildconfig.yml
-index f9a083a682..97f42f801c 100644
+index 0ba1f18af0..8012188758 100644
 --- a/mobile/android/android-components/.buildconfig.yml
 +++ b/mobile/android/android-components/.buildconfig.yml
-@@ -2229,17 +2229,6 @@ projects:
+@@ -2185,17 +2185,6 @@ projects:
      - components:support-base
      - components:support-test
      - components:tooling-lint

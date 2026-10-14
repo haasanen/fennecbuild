@@ -1,8 +1,8 @@
 diff --git a/mobile/android/geckoview/build.gradle b/mobile/android/geckoview/build.gradle
-index 71adba1b96..7e6bca66a7 100644
+index 93e4915f7d..202ade34ba 100644
 --- a/mobile/android/geckoview/build.gradle
 +++ b/mobile/android/geckoview/build.gradle
-@@ -153,7 +153,7 @@ android {
+@@ -154,7 +154,7 @@ android {
      }
  
      publishing {
@@ -11,7 +11,7 @@ index 71adba1b96..7e6bca66a7 100644
      }
  
      namespace = 'org.mozilla.geckoview'
-@@ -406,10 +406,10 @@ publishing {
+@@ -407,10 +407,10 @@ publishing {
      }
  }
  

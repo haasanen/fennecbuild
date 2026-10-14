@@ -1,39 +1,43 @@
-diff --git a/config/makefiles/rust.mk b/config/makefiles/rust.mk
-index 0a7413d3ee..97c4650974 100644
---- a/config/makefiles/rust.mk
-+++ b/config/makefiles/rust.mk
-@@ -85,19 +85,10 @@ ifndef DEVELOPER_OPTIONS
- ifndef MOZ_DEBUG_RUST
- # Enable link-time optimization for release builds, but not when linking
- # gkrust_gtest. And not when doing cross-language LTO.
--ifndef MOZ_LTO_RUST_CROSS
--# Never enable when sancov is enabled to work around https://github.com/rust-lang/rust/issues/90300.
--ifeq (,$(RUST_SANCOV_FLAGS))
--# Never enable when coverage is enabled to work around https://github.com/rust-lang/rust/issues/90045.
--ifndef MOZ_CODE_COVERAGE
--ifeq (,$(findstring gkrust_gtest,$(RUST_LIBRARY_FILE)))
--cargo_rustc_flags += -Clto$(if $(filter full,$(MOZ_LTO_RUST_CROSS)),=fat)
--endif
--# We need -Cembed-bitcode=yes for all crates when using -Clto.
--RUSTFLAGS += -Cembed-bitcode=yes
--endif
--endif
--endif
-+# Disabled for this build: fat LTO on an 874-crate workspace makes the
-+# top-level crate's codegen a ~10 GiB job that does not fit the build
-+# machine. The trade is final binary size/speed for a build that
-+# completes; restore this block when building on a bigger machine.
- endif
- endif
- 
-@@ -332,7 +323,9 @@ $(HOST_RECIPES): RUSTFLAGS:=$(rustflags_override)
+diff --git a/build/moz.configure/rust.configure b/build/moz.configure/rust.configure
+index e06863c10c..db1afd7471 100644
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -1203,7 +1203,9 @@ set_config("MOZ_CARGO_PROGRAM_LDFLAGS_FILTER_OUT", cargo_ldflags_filter_out.prog
+ # If this is a release build we want rustc to generate one codegen unit per
  # crate. This results in better optimization and less code duplication at the
  # cost of longer compile times.
- ifndef DEVELOPER_OPTIONS
--$(TARGET_RECIPES) $(HOST_RECIPES): RUSTFLAGS += -C codegen-units=1
-+# Not for this build: one codegen unit for a crate the size of
-+# geckoservo is a single ~10 GiB rustc job. rustc's default
-+# split is used instead.
+-set_config("MOZ_RUSTFLAGS_CODEGEN", ["-C", "codegen-units=1"], when=~developer_options)
++# Not for this build: one codegen unit for a crate the size of geckoservo
++# is a single ~10 GiB rustc job. rustc's default split is used instead.
++set_config("MOZ_RUSTFLAGS_CODEGEN", [], when=~developer_options)
+ 
+ # The rust wasi target defaults to statically link the wasi crt, but when we
+ # build static libraries from rust and link them with C/C++ code, we also link
+diff --git a/config/makefiles/rust.mk b/config/makefiles/rust.mk
+index ab33044841..f541c5ebf8 100644
+--- a/config/makefiles/rust.mk
++++ b/config/makefiles/rust.mk
+@@ -55,7 +55,11 @@ cargo_build_flags += $(MOZ_CARGO_BUILD_STD_ARGS)
+ # invocation (i.e., only the top-level crate, not its dependencies).
+ cargo_rustc_flags = $(CARGO_RUSTCFLAGS)
+ # Enable link-time optimization for release builds.
+-ifdef RUST_LIBRARY_LTO
++# Disabled for this build: fat LTO on the full crate workspace makes the
++# top-level crate's codegen a ~10 GiB job that does not fit the build
++# machine. The trade is final binary size/speed for a build that
++# completes; restore when building on a bigger machine.
++ifdef RUST_LIBRARY_LTO_DISABLED_FOR_SMALL_BUILDER
+ cargo_rustc_flags += -Clto
  endif
  
- # We use the + prefix to pass down the jobserver fds to cargo, but we
+@@ -330,7 +334,9 @@ ifndef MOZ_PROFILE_GENERATE
+ ifeq ($(OS_ARCH), Linux)
+ ifeq (,$(RUST_SANCOV_FLAGS)$(MOZ_ASAN)$(MOZ_TSAN)$(MOZ_UBSAN))
+ ifndef MOZ_LTO_RUST_CROSS
+-ifdef RUST_LIBRARY_LTO
++# check_binary --networking only works with -Clto; LTO is disabled for
++# this build (see cargo_rustc_flags above), so skip the check.
++ifdef RUST_LIBRARY_LTO_DISABLED_FOR_SMALL_BUILDER
+ 	$(call py_action,check_binary $(@F),--networking $(RUST_LIBRARY_FILE))
+ endif
+ endif
