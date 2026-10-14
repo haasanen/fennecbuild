@@ -90,19 +90,21 @@ jobs:
       - name: Android SDK components (NDK r30, platform, build-tools)
         run: |
           set -e
-          # Locate an existing sdkmanager; the runner's cmdline-tools layout varies
-          SM=""
-          for c in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager "$ANDROID_HOME"/cmdline-tools/bin/sdkmanager; do
-            [ -x "$c" ] && SM="$c" && break
-          done
-          if [ -z "$SM" ]; then
-            echo "cmdline-tools not found; installing (same component + checksum fennecbuild build.sh uses)"
-            curl --silent -O https://dl.google.com/android/repository/commandlinetools-linux-15641748_latest.zip
-            echo 'a66d5ef0238fc0162e9c1446602ce0dd41702d4dd7a94d2ce42d12b7f80baf7e  commandlinetools-linux-15641748_latest.zip' | sha256sum -c -
-            unzip -q commandlinetools-linux-15641748_latest.zip -d /tmp/clt
-            sudo mkdir -p "$ANDROID_HOME/cmdline-tools/21.0"
-            sudo cp -r /tmp/clt/cmdline-tools/. "$ANDROID_HOME/cmdline-tools/21.0/"
-            SM="$ANDROID_HOME/cmdline-tools/21.0/bin/sdkmanager"
+          # Firefox 158's configure demands the sdkmanager at the EXACT path
+          # cmdline-tools/23.0/bin/sdkmanager (mozboot android.py
+          # CMDLINE_TOOLS_VERSION_STRING="23.0"; build/moz.configure/
+          # android-sdk.configure android_sdk_root dies with "Android
+          # cmdline-tools 23.0 not found" if that file is absent). Any other
+          # layout the runner happens to ship is useless to configure, so
+          # always ensure exactly 23.0 and use it.
+          SM="$ANDROID_HOME/cmdline-tools/23.0/bin/sdkmanager"
+          if [ ! -x "$SM" ]; then
+            echo "cmdline-tools 23.0 not found; installing"
+            curl --silent -O https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
+            echo '0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8  commandlinetools-linux-16111833_latest.zip' | sha256sum -c -
+            unzip -q commandlinetools-linux-16111833_latest.zip -d /tmp/clt
+            sudo mkdir -p "$ANDROID_HOME/cmdline-tools/23.0"
+            sudo cp -r /tmp/clt/cmdline-tools/. "$ANDROID_HOME/cmdline-tools/23.0/"
           fi
           echo "sdkmanager: $SM"
           # The runner's /usr/lib/android-sdk is root-owned: sdkmanager (running as
@@ -122,7 +124,7 @@ jobs:
           # r29 side-by-side.
           yes | "$SM" "ndk;30.0.16248370" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
           # hard check: fail loudly if anything is actually missing
-          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 ndk/29.0.14206865 platform-tools; do
+          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 ndk/29.0.14206865 platform-tools cmdline-tools/23.0; do
             [ -d "$ANDROID_HOME/$d" ] || { echo "MISSING $ANDROID_HOME/$d"; ls -la "$ANDROID_HOME"; exit 1; }
           done
           echo "installed platforms:"; ls "$ANDROID_HOME/platforms"
