@@ -154,7 +154,10 @@ pushd "$android_components"
 # Viaduct from A-S requires concept-fetch 150.0.3 built with compileSdk 36.1.
 # Build such a copy of the concept-fetch module from the current A-C source
 echo 150.0.3 > ../version.txt
-sed -i -e '/compileSdkMajorVersion/s/37/36/' .config.yml
+# Set BOTH major and minor explicitly: 157-era .config.yml had minor 1
+# (major-only sed yielded 36.1), 158-era has minor 2 (would yield the
+# non-existent platforms;android-36.2). Pin the pair deterministically.
+sed -i -e 's/^compileSdkMajorVersion:.*/compileSdkMajorVersion: 36/' -e 's/^compileSdkMinorVersion:.*/compileSdkMinorVersion: 1/' .config.yml
 gradle :components:concept-fetch:publishToMavenLocal
 git checkout .config.yml ../version.txt
 # Required by UnifiedPush (keep exactly where upstream had it: before
