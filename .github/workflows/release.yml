@@ -115,9 +115,14 @@ jobs:
           # Accept licenses (non-interactive now that the dir is writable)
           yes | "$SM" --licenses
           # Install the components (no prompt expected; keep 'yes' as belt-and-braces)
-          yes | "$SM" "ndk;30.0.16248370" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
+          # Two NDKs: Firefox 158 configure hard-requires r30 (mozboot
+          # NDK_VERSION=r30), but glean v70.x pins ndkVersion 29.0.14206865 in
+          # its root build.gradle (AGP resolves it by exact SDK dir). Gecko
+          # gets r30 via --with-android-ndk=$ANDROID_NDK; glean's gradle finds
+          # r29 side-by-side.
+          yes | "$SM" "ndk;30.0.16248370" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
           # hard check: fail loudly if anything is actually missing
-          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 platform-tools; do
+          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 ndk/29.0.14206865 platform-tools; do
             [ -d "$ANDROID_HOME/$d" ] || { echo "MISSING $ANDROID_HOME/$d"; ls -la "$ANDROID_HOME"; exit 1; }
           done
           echo "installed platforms:"; ls "$ANDROID_HOME/platforms"
