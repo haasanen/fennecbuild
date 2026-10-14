@@ -171,19 +171,19 @@ jobs:
           # repeated clone flakes (HTTP 500 / connect timeouts) — skip it.
           (cd "$SIB/srclib/wasi-sdk" && git submodule update --init --depth 1 src/llvm-project src/wasi-libc)
           df -h /
-          echo "=== llvm @ 3b5e7c83 (llvm-project commit)"
+          echo "=== llvm @ 2d287f51 (llvm-project commit; r30-era clang base, matches NDK r30 libc++ headers)"
           git init "$SIB/srclib/llvm"
           (cd "$SIB/srclib/llvm" && \
             git remote add origin https://github.com/llvm/llvm-project && \
-            git fetch --depth 1 origin 3b5e7c83a6e226d5bd7ed2e9b67449b64812074c && \
+            git fetch --depth 1 origin 2d287f51eff2a5fbf84458a33f7fb2493cf67965 && \
             git checkout -q FETCH_HEAD)
           df -h /
-          echo "=== llvm_android @ e727bfb0 (full clone: googlesource SHA checkout)"
+          echo "=== llvm_android @ 387fa439 (full clone: googlesource SHA checkout)"
           git clone https://android.googlesource.com/toolchain/llvm_android "$SIB/srclib/llvm_android"
-          (cd "$SIB/srclib/llvm_android" && git checkout -q e727bfb014bd436f581a66a450c939a6983a1fc3)
-          echo "=== toolchain-utils @ dd1ee45a (full clone: googlesource SHA checkout)"
+          (cd "$SIB/srclib/llvm_android" && git checkout -q 387fa4393dd149c6206bbd4528edd44649f74203)
+          echo "=== toolchain-utils @ 9b4f9476 (full clone: googlesource SHA checkout)"
           git clone https://android.googlesource.com/platform/external/toolchain-utils "$SIB/srclib/toolchain-utils"
-          (cd "$SIB/srclib/toolchain-utils" && git checkout -q dd1ee45a84cb07337f9d5d0a6769d9b865c6e620)
+          (cd "$SIB/srclib/toolchain-utils" && git checkout -q 9b4f94761eea83b6edd1b59f485cddff6bd01b38)
           df -h /
           echo "=== srclib sizes ==="
           du -sh "$SIB"/srclib/*
@@ -270,7 +270,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/llvm/out
-          key: fennec-llvm-out-3b5e7c83-v1
+          key: fennec-llvm-out-2d287f51-v1
 
       - name: Restore WASI toolchain (if cached from a previous run)
         id: wasi-restore
@@ -313,7 +313,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SRCLIB_DIR }}/llvm/out
-          key: fennec-llvm-out-3b5e7c83-v1
+          key: fennec-llvm-out-2d287f51-v1
 
       - name: Build WASI SDK (or restore from cache)
         run: |
