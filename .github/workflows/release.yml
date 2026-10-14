@@ -30,7 +30,7 @@ env:
   # env. Pin both to the same directory (F-Droid uses one root); AGP is
   # fussy about the two pointing at different SDK roots.
   ANDROID_SDK_ROOT: /usr/lib/android-sdk
-  NDK_VERSION: "29.0.14206865"
+  NDK_VERSION: "30.0.16248370"
 
 jobs:
   build:
@@ -87,7 +87,7 @@ jobs:
           rustup default 1.95.0
           rustc --version
 
-      - name: Android SDK components (NDK r29, platform, build-tools)
+      - name: Android SDK components (NDK r30, platform, build-tools)
         run: |
           set -e
           # Locate an existing sdkmanager; the runner's cmdline-tools layout varies
@@ -115,13 +115,13 @@ jobs:
           # Accept licenses (non-interactive now that the dir is writable)
           yes | "$SM" --licenses
           # Install the components (no prompt expected; keep 'yes' as belt-and-braces)
-          yes | "$SM" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
+          yes | "$SM" "ndk;30.0.16248370" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
           # hard check: fail loudly if anything is actually missing
-          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/29.0.14206865 platform-tools; do
+          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 platform-tools; do
             [ -d "$ANDROID_HOME/$d" ] || { echo "MISSING $ANDROID_HOME/$d"; ls -la "$ANDROID_HOME"; exit 1; }
           done
           echo "installed platforms:"; ls "$ANDROID_HOME/platforms"
-          echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           df -h /
 
