@@ -122,9 +122,9 @@ jobs:
           # its root build.gradle (AGP resolves it by exact SDK dir). Gecko
           # gets r30 via --with-android-ndk=$ANDROID_NDK; glean's gradle finds
           # r29 side-by-side.
-          yes | "$SM" "ndk;30.0.16248370" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0" "platform-tools"
+          yes | "$SM" "ndk;30.0.16248370" "ndk;29.0.14206865" "platforms;android-35" "platforms;android-36" "platforms;android-36.1" "platforms;android-37.0" "platforms;android-37.1" "platforms;android-37.2" "build-tools;37.0.0" "platform-tools"
           # hard check: fail loudly if anything is actually missing
-          for d in platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 ndk/29.0.14206865 platform-tools cmdline-tools/23.0; do
+          for d in platforms/android-37.2 platforms/android-37.1 platforms/android-35 platforms/android-36 build-tools/37.0.0 ndk/30.0.16248370 ndk/29.0.14206865 platform-tools cmdline-tools/23.0; do
             [ -d "$ANDROID_HOME/$d" ] || { echo "MISSING $ANDROID_HOME/$d"; ls -la "$ANDROID_HOME"; exit 1; }
           done
           echo "installed platforms:"; ls "$ANDROID_HOME/platforms"
