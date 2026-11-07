@@ -761,10 +761,10 @@ index 0000000000..f89b06d387
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
-index 0000000000..e144b91308
+index 0000000000..5efd8b9f1a
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
-@@ -0,0 +1,615 @@
+@@ -0,0 +1,625 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1139,11 +1139,10 @@ index 0000000000..e144b91308
 +   */
 +  private byte[] transactMessage(final byte cmd, final byte[] data) {
 +    final int total = data.length;
-+    final int perPacket = mReportSize - 7;
 +    int offset = 0;
 +    int packetIndex = 0;
 +    while (true) {
-+      final int chunk = Math.min(perPacket, total - offset);
++      final int chunk = Math.min(outPayloadCapacity(mReportSize, packetIndex), total - offset);
 +      final ByteBuffer packet = newOutPacket();
 +      if (packetIndex == 0) {
 +        putFirstPacketHeader(packet, mChannel, cmd, total);
@@ -1337,6 +1336,17 @@ index 0000000000..e144b91308
 +
 +  static final int FIRST_PAYLOAD_OFFSET = 7; // CID(4) CMD(1) BCNT(2)
 +  static final int CONT_PAYLOAD_OFFSET = 5; // CID(4) SEQ(1)
++
++  /**
++   * Payload capacity of the {@code packetIndex}-th outbound packet (spec 8.1.9.1): the first
++   * packet carries a 7-byte header (CID|CMD|BCNT) while continuation packets carry only 5 bytes
++   * (CID|SEQ). Slicing continuations with the first-packet width inserts two padding bytes into
++   * the middle of the CTAP2 CBOR stream, which real authenticators reject with
++   * CTAP2_ERR_INVALID_CBOR (0x11).
++   */
++  static int outPayloadCapacity(final int reportSize, final int packetIndex) {
++    return reportSize - (packetIndex == 0 ? FIRST_PAYLOAD_OFFSET : CONT_PAYLOAD_OFFSET);
++  }
 +
 +  /** Command byte of a response packet with the TYPE bit masked off. */
 +  static byte cmdOf(final ByteBuffer p) {
@@ -3292,10 +3302,10 @@ index 0000000000..1c5bb53dbe
 +}
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
 new file mode 100644
-index 0000000000..19e6cba433
+index 0000000000..e58e6c8067
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,176 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -3418,6 +3428,57 @@ index 0000000000..19e6cba433
 +    assertEquals(100, body.size());
 +    for (int i = 0; i < 100; i++) {
 +      assertEquals((byte) i, body.toByteArray()[i]);
++    }
++  }
++
++  @Test
++  public void outboundCapacityUsesFirstPacketWidthOnlyForPacketZero() {
++    assertEquals(57, UsbCtap2Transport.outPayloadCapacity(64, 0));
++    assertEquals(59, UsbCtap2Transport.outPayloadCapacity(64, 1));
++    assertEquals(59, UsbCtap2Transport.outPayloadCapacity(64, 2));
++  }
++
++  @Test
++  public void multiPacketOutboundReassemblesByteExactOnDevice() {
++    // Regression: makeCredential CBOR (~165 B) was the first payload spanning multiple
++    // reports. Slicing continuation packets at reportSize-7 spliced two 0x00 padding bytes
++    // into the stream every 57 bytes and YubiKeys answered CTAP2_ERR_INVALID_CBOR (0x11).
++    for (final int total : new int[] {57, 58, 116, 165, 300}) {
++      final byte[] data = new byte[total];
++      for (int i = 0; i < total; i++) {
++        data[i] = (byte) (i % 251);
++      }
++      final java.util.List<byte[]> reports = new java.util.ArrayList<byte[]>();
++      int off = 0;
++      int idx = 0;
++      while (true) {
++        final byte[] r = new byte[64];
++        final java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(r);
++        final int chunk =
++            Math.min(UsbCtap2Transport.outPayloadCapacity(64, idx), total - off);
++        if (idx == 0) {
++          UsbCtap2Transport.putFirstPacketHeader(b, 0x12345678, (byte) 0x10, total);
++        } else {
++          b.putInt(0x12345678);
++          b.put((byte) (idx - 1));
++        }
++        b.put(data, off, chunk);
++        reports.add(r);
++        off += chunk;
++        idx++;
++        if (off >= total) {
++          break;
++        }
++      }
++      // Device-side view: strip the per-packet headers (7 for the first report, 5 for each
++      // continuation) and concatenate; BCNT bounds the message.
++      final ByteArrayOutputStream dev = new ByteArrayOutputStream();
++      for (int p = 0; p < reports.size(); p++) {
++        UsbCtap2Transport.readPayloadInto(
++            dev, java.nio.ByteBuffer.wrap(reports.get(p)), total, p == 0 ? 7 : 5);
++      }
++      final byte[] got = java.util.Arrays.copyOf(dev.toByteArray(), total);
++      assertArrayEquals("payload span " + total, data, got);
 +    }
 +  }
 +}
