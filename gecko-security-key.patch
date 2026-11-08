@@ -63,10 +63,10 @@ index 83bfdf85e6..186a662b15 100644
              android:required="false"/>
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 new file mode 100644
-index 0000000000..e866b85327
+index 0000000000..1b1e0568bf
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,408 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -195,6 +195,22 @@ index 0000000000..e866b85327
 +      final List<CredentialId> allowCredentials,
 +      final String appId,
 +      final boolean userVerificationRequired) {
++    return encodeGetAssertion(rpId, clientDataHash, allowCredentials, appId,
++        userVerificationRequired, null);
++  }
++
++  /**
++   * Same request with an optional pinUvAuthParam: after a ClientPIN handshake the platform retries
++   * with key 6 = pinAuth (16-byte HMAC over the clientDataHash) and key 7 = pinUvAuthProtocol id
++   * (auth-rs get_assertion.rs keys 6/7 — the PIN_REQUIRED 0x36 retry path).
++   */
++  public static byte[] encodeGetAssertion(
++      final String rpId,
++      final byte[] clientDataHash,
++      final List<CredentialId> allowCredentials,
++      final String appId,
++      final boolean userVerificationRequired,
++      final byte[] pinAuth) {
 +    final CBORObject map = CBORObject.NewMap();
 +    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(rpId));
 +    map.Add(CBORObject.FromObject(2), CBORObject.FromObject(clientDataHash));
@@ -220,6 +236,10 @@ index 0000000000..e866b85327
 +      opts.Add(CBORObject.FromObject("uv"), CBORObject.FromObject(true));
 +    }
 +    map.Add(CBORObject.FromObject(5), opts);
++    if (pinAuth != null) {
++      map.Add(CBORObject.FromObject(6), CBORObject.FromObject(pinAuth));
++      map.Add(CBORObject.FromObject(7), CBORObject.FromObject(1)); // pinUvAuthProtocol id
++    }
 +    return map.EncodeToBytes(CTAP2_CANONICAL);
 +  }
 +
@@ -290,6 +310,27 @@ index 0000000000..e866b85327
 +      final List<CredentialId> excludeList,
 +      final boolean residentKey,
 +      final boolean userVerificationRequired) {
++    return encodeMakeCredential(
++        clientDataHash, rpId, rpName, userId, userName, userDisplayName, pubKeyCredParams,
++        excludeList, residentKey, userVerificationRequired, null);
++  }
++
++  /**
++   * Same request with an optional pinUvAuthParam: key 8 = pinAuth, key 9 = pinUvAuthProtocol id
++   * (auth-rs make_credentials.rs keys 8/9 — the PIN_REQUIRED 0x36 retry path).
++   */
++  public static byte[] encodeMakeCredential(
++      final byte[] clientDataHash,
++      final String rpId,
++      final String rpName,
++      final byte[] userId,
++      final String userName,
++      final String userDisplayName,
++      final List<PublicKeyCredParam> pubKeyCredParams,
++      final List<CredentialId> excludeList,
++      final boolean residentKey,
++      final boolean userVerificationRequired,
++      final byte[] pinAuth) {
 +    final CBORObject map = CBORObject.NewMap();
 +    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(clientDataHash));
 +
@@ -342,7 +383,55 @@ index 0000000000..e866b85327
 +      opts.Add(CBORObject.FromObject("uv"), CBORObject.FromObject(true));
 +    }
 +    map.Add(CBORObject.FromObject(7), opts);
++    if (pinAuth != null) {
++      map.Add(CBORObject.FromObject(8), CBORObject.FromObject(pinAuth));
++      map.Add(CBORObject.FromObject(9), CBORObject.FromObject(1)); // pinUvAuthProtocol id
++    }
 +    return map.EncodeToBytes(CTAP2_CANONICAL);
++  }
++
++  /**
++   * authenticatorClientPIN (0x04) GetKeyAgreement sub-request for pinUvAuthProtocol 1: {@code
++   * {1: 1, 2: 0x02}}. Message shapes mirror the production Rust client (auth-rs client_pin.rs):
++   * optional keys are omitted, not nulled.
++   */
++  public static byte[] encodeClientPinGetKeyAgreement() {
++    final CBORObject map = CBORObject.NewMap();
++    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(1)); // pinUvAuthProtocol 1
++    map.Add(CBORObject.FromObject(2), CBORObject.FromObject(2)); // subCommand GetKeyAgreement
++    return map.EncodeToBytes(CTAP2_CANONICAL);
++  }
++
++  /**
++   * authenticatorClientPIN GetPinToken sub-request: {@code {1: 1, 2: 0x03, 3: platformKeyAgreement
++   * (COSE EC2 map), 6: pinHashEnc (AES-256-CBC of the 16-byte pin hash)}}.
++   */
++  public static byte[] encodeClientPinGetPinToken(
++      final CBORObject platformKeyAgreement, final byte[] pinHashEnc) {
++    final CBORObject map = CBORObject.NewMap();
++    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(1));
++    map.Add(CBORObject.FromObject(2), CBORObject.FromObject(3)); // subCommand GetPinToken
++    map.Add(CBORObject.FromObject(3), platformKeyAgreement);
++    map.Add(CBORObject.FromObject(6), CBORObject.FromObject(pinHashEnc));
++    return map.EncodeToBytes(CTAP2_CANONICAL);
++  }
++
++  /** GetKeyAgreement response: key 1 is the authenticator's keyAgreement COSE EC2 map. */
++  public static CBORObject decodeClientPinKeyAgreement(final byte[] bytes) {
++    final CBORObject ka = CBORObject.DecodeFromBytes(bytes).get(1);
++    if (ka == null || ka.getType() != CBORType.Map) {
++      throw new IllegalStateException("ClientPIN response missing keyAgreement map");
++    }
++    return ka;
++  }
++
++  /** GetPinToken response: key 2 is pinTokenEnc, an AES-256-CBC encrypted pinToken. */
++  public static byte[] decodeClientPinPinTokenEnc(final byte[] bytes) {
++    final CBORObject enc = CBORObject.DecodeFromBytes(bytes).get(2);
++    if (enc == null || enc.getType() != CBORType.ByteString) {
++      throw new IllegalStateException("ClientPIN response missing pinTokenEnc bytes");
++    }
++    return enc.GetByteString();
 +  }
 +
 +  /**
@@ -759,12 +848,245 @@ index 0000000000..f89b06d387
 +    }
 +  }
 +}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
+new file mode 100644
+index 0000000000..ee1a9c0e25
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
+@@ -0,0 +1,227 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++import com.upokecenter.cbor.CBORObject;
++import java.math.BigInteger;
++import java.nio.charset.StandardCharsets;
++import java.security.KeyFactory;
++import java.security.KeyPair;
++import java.security.KeyPairGenerator;
++import java.security.MessageDigest;
++import java.security.interfaces.ECPrivateKey;
++import java.security.interfaces.ECPublicKey;
++import java.security.spec.ECGenParameterSpec;
++import java.security.spec.ECParameterSpec;
++import java.security.spec.ECPoint;
++import java.security.spec.ECPublicKeySpec;
++import java.util.Arrays;
++import javax.crypto.Cipher;
++import javax.crypto.KeyAgreement;
++import javax.crypto.Mac;
++import javax.crypto.spec.IvParameterSpec;
++import javax.crypto.spec.SecretKeySpec;
++
++/**
++ * pinUvAuthProtocol 1 (CTAP2 spec sections 5.4, 5.5.1.1, 6.5, 6.6): an ECDH P-256 shared secret,
++ * AES-256-CBC with a zero IV and zero padding, and HMAC-SHA-256 truncated to 16 bytes. The
++ * handshake rides authenticatorClientPIN (CTAP command 0x04) over an open {@link Ctap2Session}.
++ *
++ * <p>Message shapes and crypto constants mirror the production Rust client that Firefox desktop
++ * runs against these same keys (authenticator crate: client_pin.rs, crypto/mod.rs), down to
++ * omitted-optional-key encoding and the un-padded {@code SHA-256(pin)} pin hash.
++ *
++ * <p>A key with an enrolled PIN answers makeCredential/getAssertion with PIN_REQUIRED (0x36). The
++ * platform then runs {@link #obtainPinToken} and retries the operation with the 16-byte
++ * {@link #authenticate}(pinToken, clientDataHash) value in makeCredential key 8 (protocol 1 in key
++ * 9) or getAssertion key 6 (protocol 1 in key 7).
++ */
++public final class PinProtocolOne {
++  /** authenticatorClientPIN (CTAP2 spec section 5.4). */
++  public static final int CTAP_CLIENT_PIN = 0x04;
++
++  // PIN-family status codes (spec section 6.1; byte values verified against the auth-rs and
++  // CTAP-2.2 mapping tables).
++  public static final int STATUS_PIN_INVALID = 0x31;
++  public static final int STATUS_PIN_BLOCKED = 0x32;
++  public static final int STATUS_PIN_AUTH_BLOCKED = 0x34;
++  public static final int STATUS_PIN_NOT_SET = 0x35;
++  public static final int STATUS_PIN_REQUIRED = 0x36;
++  public static final int STATUS_UV_BLOCKED = 0x3C;
++
++  private static final int PIN_HASH_LEN = 16;
++  private static final int PIN_TOKEN_LEN = 16;
++  private static final int PIN_AUTH_LEN = 16;
++  private static final int AES_BLOCK = 16;
++
++  private PinProtocolOne() {}
++
++  /** Fresh ephemeral P-256 pair for one handshake (platform side, per spec 6.6.1). */
++  public static KeyPair generatePlatformKey() throws Ctap2Error {
++    try {
++      final KeyPairGenerator gen = KeyPairGenerator.getInstance("EC");
++      gen.initialize(new ECGenParameterSpec("secp256r1"));
++      return gen.generateKeyPair();
++    } catch (final Exception e) {
++      throw new Ctap2Error("no P-256 key pair available for the PIN handshake", 0, e);
++    }
++  }
++
++  /** Our COSE EC2 keyAgreement map {@code {1: 2 (EC2), -1: 1 (P-256), -2: x, -3: y}} (spec 4.2.8). */
++  static CBORObject toCoseKey(final ECPublicKey pub) {
++    final ECPoint w = pub.getW();
++    final CBORObject map = CBORObject.NewMap();
++    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(2)); // kty EC2
++    map.Add(CBORObject.FromObject(-1), CBORObject.FromObject(1)); // crv P-256
++    map.Add(CBORObject.FromObject(-2), CBORObject.FromObject(fixed32(w.getAffineX())));
++    map.Add(CBORObject.FromObject(-3), CBORObject.FromObject(fixed32(w.getAffineY())));
++    return map;
++  }
++
++  /** Rebuilds the authenticator's EC public key from its keyAgreement COSE map. */
++  static ECPublicKey peerPublicKey(final CBORObject cose) throws Ctap2Error {
++    try {
++      final CBORObject x = cose.get(-2);
++      final CBORObject y = cose.get(-3);
++      if (x == null || y == null) {
++        throw new IllegalStateException("keyAgreement map missing x/y");
++      }
++      final ECParameterSpec spec = p256Spec();
++      final ECPoint point =
++          new ECPoint(new BigInteger(1, x.GetByteString()), new BigInteger(1, y.GetByteString()));
++      return (ECPublicKey) KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(point, spec));
++    } catch (final Ctap2Error e) {
++      throw e;
++    } catch (final Exception e) {
++      throw new Ctap2Error("malformed keyAgreement key from the security key", 0, e);
++    }
++  }
++
++  /**
++   * Shared secret = SHA-256 over the raw 32-byte ECDH x-coordinate (auth-rs ecdhe_p256_raw +
++   * Sha256 parity; JDK and Android KeyAgreement both return the raw x).
++   */
++  static byte[] sharedSecret(final ECPrivateKey ourPrivate, final ECPublicKey peer)
++      throws Ctap2Error {
++    try {
++      final KeyAgreement ka = KeyAgreement.getInstance("ECDH");
++      ka.init(ourPrivate);
++      ka.doPhase(peer, true);
++      final byte[] raw = ka.generateSecret();
++      if (raw.length != 32) {
++        // Defensive: a provider that hands back an encoded point instead of the raw coordinate.
++        throw new IllegalStateException("ECDH returned " + raw.length + " bytes, expected raw x (32)");
++      }
++      return sha256(raw);
++    } catch (final Exception e) {
++      throw new Ctap2Error("PIN key agreement failed", 0, e);
++    }
++  }
++
++  /**
++   * Runs GetKeyAgreement then GetPinToken on an open session and returns the 16-byte pinToken.
++   * The PIN travels only as pinHashEnc (AES-CBC of the pin hash), never in the clear.
++   *
++   * @throws Ctap2Error with status {@link #STATUS_PIN_INVALID} for a wrong PIN and the matching
++   *     code for blocked/unset PIN states, so the caller can re-prompt or fail cleanly.
++   */
++  public static byte[] obtainPinToken(final Ctap2Session session, final String pin)
++      throws Ctap2Error {
++    final KeyPair pair = generatePlatformKey();
++    final byte[] kaResp = session.send(CTAP_CLIENT_PIN, Ctap2Cbor.encodeClientPinGetKeyAgreement());
++    final ECPublicKey peerKey = peerPublicKey(Ctap2Cbor.decodeClientPinKeyAgreement(kaResp));
++    final byte[] secret = sharedSecret((ECPrivateKey) pair.getPrivate(), peerKey);
++    final byte[] pinHashEnc = aesCbc(secret, pinHash(pin), true);
++    final byte[] tokenResp =
++        session.send(
++            CTAP_CLIENT_PIN,
++            Ctap2Cbor.encodeClientPinGetPinToken(
++                toCoseKey((ECPublicKey) pair.getPublic()), pinHashEnc));
++    final byte[] decrypted = aesCbc(secret, Ctap2Cbor.decodeClientPinPinTokenEnc(tokenResp), false);
++    final byte[] token = stripTrailingZeros(decrypted);
++    if (token.length < PIN_TOKEN_LEN) {
++      throw new Ctap2Error("the security key returned a short pinToken");
++    }
++    return Arrays.copyOf(token, PIN_TOKEN_LEN);
++  }
++
++  /** Pin hash: first 16 bytes of SHA-256 over the UTF-8 PIN bytes (auth-rs for_pin_token parity). */
++  public static byte[] pinHash(final String pin) {
++    return Arrays.copyOf(sha256(pin.getBytes(StandardCharsets.UTF_8)), PIN_HASH_LEN);
++  }
++
++  /** pinUvAuthParam / pinAuth: first 16 bytes of HMAC-SHA-256(key, message) (spec 6.5.1). */
++  public static byte[] authenticate(final byte[] key, final byte[] message) throws Ctap2Error {
++    try {
++      final Mac mac = Mac.getInstance("HmacSHA256");
++      mac.init(new SecretKeySpec(key, "HmacSHA256"));
++      return Arrays.copyOf(mac.doFinal(message), PIN_AUTH_LEN);
++    } catch (final Exception e) {
++      throw new Ctap2Error("PIN authentication failed", 0, e);
++    }
++  }
++
++  /** AES-256-CBC with zero IV; encrypt zero-pads to a block multiple (spec 6.5), decrypt keeps
++   * raw output for {@link #stripTrailingZeros}. */
++  static byte[] aesCbc(final byte[] key32, final byte[] data, final boolean encrypt)
++      throws Ctap2Error {
++    return aesCbc(key32, new byte[AES_BLOCK], data, encrypt);
++  }
++
++  static byte[] aesCbc(
++      final byte[] key32, final byte[] iv16, final byte[] data, final boolean encrypt)
++      throws Ctap2Error {
++    try {
++      final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
++      cipher.init(
++          encrypt ? Cipher.ENCRYPT_MODE : Cipher.DECRYPT_MODE,
++          new SecretKeySpec(key32, "AES"),
++          new IvParameterSpec(iv16));
++      if (!encrypt) {
++        return cipher.doFinal(data);
++      }
++      final int rem = data.length % AES_BLOCK;
++      final byte[] padded = rem == 0 ? data : Arrays.copyOf(data, data.length + AES_BLOCK - rem);
++      return cipher.doFinal(padded);
++    } catch (final Exception e) {
++      throw new Ctap2Error("AES-CBC PIN transport failed", 0, e);
++    }
++  }
++
++  static byte[] stripTrailingZeros(final byte[] in) {
++    int end = in.length;
++    while (end > 0 && in[end - 1] == 0) {
++      end--;
++    }
++    return Arrays.copyOf(in, end);
++  }
++
++  private static ECParameterSpec p256Spec() throws Ctap2Error {
++    // Pull the curve spec off a generated key instead of hard-coding p/a/b/G/n literals.
++    return ((ECPublicKey) generatePlatformKey().getPublic()).getParams();
++  }
++
++  private static byte[] fixed32(final BigInteger v) {
++    final byte[] raw = v.toByteArray();
++    if (raw.length == 32) {
++      return raw;
++    }
++    final byte[] out = new byte[32];
++    if (raw.length > 32) { // leading sign zero
++      System.arraycopy(raw, raw.length - 32, out, 0, 32);
++    } else {
++      System.arraycopy(raw, 0, out, 32 - raw.length, raw.length);
++    }
++    return out;
++  }
++
++  private static byte[] sha256(final byte[] in) {
++    try {
++      return MessageDigest.getInstance("SHA-256").digest(in);
++    } catch (final Exception e) {
++      throw new Ctap2Error("SHA-256 unavailable", 0, e);
++    }
++  }
++}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
-index 0000000000..5efd8b9f1a
+index 0000000000..befb0521ca
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
-@@ -0,0 +1,625 @@
+@@ -0,0 +1,647 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1185,20 +1507,42 @@ index 0000000000..5efd8b9f1a
 +        return null;
 +      }
 +      readPayloadInto(body, resp, len, FIRST_PAYLOAD_OFFSET);
-+      int nextSeq = 0;
-+      while (body.size() < len) {
-+        final ByteBuffer cont = waitForIn();
-+        if (cont == null) {
-+          return null;
-+        }
-+        if (cidOf(cont) != mChannel || (cont.get(4) & 0xFF) != (nextSeq & 0xFF)) {
-+          continue; // foreign or out-of-order continuation; keep waiting
-+        }
-+        readPayloadInto(body, cont, len - body.size(), CONT_PAYLOAD_OFFSET);
-+        nextSeq++;
++      if (!fillContinuations(this::waitForIn, mChannel, body, len)) {
++        return null;
 +      }
 +      return body.toByteArray();
 +    }
++  }
++
++  /** Inbound HID report source, abstracted so response reassembly is host-testable. */
++  interface InboundReportSource {
++    /** The next inbound report, or null on transport failure/timeout. */
++    ByteBuffer nextReport();
++  }
++
++  /**
++   * Appends continuation reports to {@code body} until it holds {@code payloadLen} bytes, skipping
++   * foreign-channel and unexpected-SEQ packets (spec 8.1.3; the inbound counterpart of
++   * {@link #outPayloadCapacity} on the outbound side). Returns false on transport failure.
++   */
++  static boolean fillContinuations(
++      final InboundReportSource source,
++      final int channel,
++      final ByteArrayOutputStream body,
++      final int payloadLen) {
++    int nextSeq = 0;
++    while (body.size() < payloadLen) {
++      final ByteBuffer cont = source.nextReport();
++      if (cont == null) {
++        return false;
++      }
++      if (cidOf(cont) != channel || (cont.get(4) & 0xFF) != (nextSeq & 0xFF)) {
++        continue; // foreign or out-of-order continuation; keep waiting
++      }
++      readPayloadInto(body, cont, payloadLen - body.size(), CONT_PAYLOAD_OFFSET);
++      nextSeq++;
++    }
++    return true;
 +  }
 +
 +  /**
@@ -1392,10 +1736,10 @@ index 0000000000..5efd8b9f1a
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..7bcdf7f576
+index 0000000000..a3b95e6a33
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,870 @@
+@@ -0,0 +1,993 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1404,6 +1748,7 @@ index 0000000000..7bcdf7f576
 +
 +import android.annotation.SuppressLint;
 +import android.app.Activity;
++import android.app.AlertDialog;
 +import android.app.Application;
 +import android.app.PendingIntent;
 +import android.content.BroadcastReceiver;
@@ -1416,10 +1761,15 @@ index 0000000000..7bcdf7f576
 +import android.os.Build;
 +import android.os.Handler;
 +import android.os.Looper;
++import android.text.InputType;
 +import android.util.Log;
++import android.widget.EditText;
 +import com.upokecenter.cbor.CBORObject;
 +import java.lang.ref.WeakReference;
 +import java.util.List;
++import java.util.concurrent.ArrayBlockingQueue;
++import java.util.concurrent.BlockingQueue;
++import java.util.concurrent.TimeUnit;
 +import java.util.concurrent.atomic.AtomicBoolean;
 +import org.mozilla.gecko.GeckoAppShell;
 +import org.mozilla.gecko.util.WebAuthnUtils;
@@ -2024,9 +2374,33 @@ index 0000000000..7bcdf7f576
 +            request.excludeList,
 +            request.residentKeyRequested,
 +            request.userVerificationRequired);
-+    final Ctap2Cbor.MakeCredentialResponse ctap =
-+        Ctap2Cbor.decodeMakeCredential(
-+            session.send(Ctap2Session.CTAP_MAKE_CREDENTIAL, cbor));
++    byte[] body;
++    try {
++      body = session.send(Ctap2Session.CTAP_MAKE_CREDENTIAL, cbor);
++    } catch (final Ctap2Error e) {
++      if (e.getCtapStatus() != PinProtocolOne.STATUS_PIN_REQUIRED) {
++        throw e;
++      }
++      // The key has an enrolled PIN (spec 5.1.4): run the ClientPIN handshake and retry with
++      // pinUvAuthParam (key 8, protocol 1 in key 9).
++      final byte[] pinAuth = authorizeWithPin(request, session);
++      body =
++          session.send(
++              Ctap2Session.CTAP_MAKE_CREDENTIAL,
++              Ctap2Cbor.encodeMakeCredential(
++                  request.clientDataHash,
++                  request.rpId,
++                  request.rpName,
++                  request.userId,
++                  request.userName,
++                  request.userDisplayName,
++                  request.pubKeyCredParams,
++                  request.excludeList,
++                  request.residentKeyRequested,
++                  request.userVerificationRequired,
++                  pinAuth));
++    }
++    final Ctap2Cbor.MakeCredentialResponse ctap = Ctap2Cbor.decodeMakeCredential(body);
 +    final WebAuthnUtils.MakeCredentialResponse.Builder builder =
 +        new WebAuthnUtils.MakeCredentialResponse.Builder()
 +            .setKeyHandle(extractCredentialId(ctap.authData))
@@ -2054,9 +2428,29 @@ index 0000000000..7bcdf7f576
 +            request.allowList,
 +            request.appId,
 +            request.userVerificationRequired);
++    byte[] body;
++    try {
++      body = session.send(Ctap2Session.CTAP_GET_ASSERTION, cbor);
++    } catch (final Ctap2Error e) {
++      if (e.getCtapStatus() != PinProtocolOne.STATUS_PIN_REQUIRED) {
++        throw e;
++      }
++      // PIN_REQUIRED (spec 5.2.4): handshake for a pinToken, then retry with pinUvAuthParam in
++      // key 6 / protocol id in key 7. The param covers the real clientDataHash even under appid.
++      final byte[] pinAuth = authorizeWithPin(request, session);
++      body =
++          session.send(
++              Ctap2Session.CTAP_GET_ASSERTION,
++              Ctap2Cbor.encodeGetAssertion(
++                  rpIdForKey,
++                  request.clientDataHash,
++                  request.allowList,
++                  request.appId,
++                  request.userVerificationRequired,
++                  pinAuth));
++    }
 +    final Ctap2Cbor.GetAssertionResponse ctap =
-+        Ctap2Cbor.decodeGetAssertion(
-+            session.send(Ctap2Session.CTAP_GET_ASSERTION, cbor), request.allowList);
++        Ctap2Cbor.decodeGetAssertion(body, request.allowList);
 +    return new WebAuthnUtils.GetAssertionResponse.Builder()
 +        .setClientDataJson(null)
 +        .setKeyHandle(ctap.credentialId)
@@ -2130,6 +2524,79 @@ index 0000000000..7bcdf7f576
 +      return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice.class);
 +    }
 +    return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
++  }
++
++  /**
++   * Handles PIN_REQUIRED (0x36): prompts for the key's PIN, obtains a pinToken through the
++   * pinUvAuthProtocol-1 handshake, and returns the pinUvAuthParam for the retried request. A wrong
++   * PIN re-prompts (up to three prompts total); blocked/unset PIN states fail immediately, since
++   * re-entering cannot fix them.
++   */
++  private static byte[] authorizeWithPin(final Request request, final Ctap2Session session)
++      throws Ctap2Error {
++    Ctap2Error last = null;
++    String note = null;
++    for (int attempt = 0; attempt < 3; attempt++) {
++      final String pin = promptForPin(request.rpId, note);
++      if (pin == null) {
++        throw new Ctap2Error("security key PIN entry was cancelled or is unavailable");
++      }
++      try {
++        final byte[] pinToken = PinProtocolOne.obtainPinToken(session, pin);
++        return PinProtocolOne.authenticate(pinToken, request.clientDataHash);
++      } catch (final Ctap2Error e) {
++        if (e.getCtapStatus() != PinProtocolOne.STATUS_PIN_INVALID) {
++          throw e; // blocked / not-set / protocol error: re-prompting cannot help
++        }
++        last = e;
++        note = "The PIN was wrong. Try again.";
++      }
++    }
++    throw last;
++  }
++
++  /**
++   * Shows the security-key PIN dialog on the UI thread and blocks the (background) exchange thread
++   * until it is answered. Returns null on cancel, when no activity is resumed, or after a
++   * 2-minute timeout — an exchange must never hang on a dialog the user is not going to answer.
++   */
++  private static String promptForPin(final String rpId, final String note) {
++    final Activity activity = sResumedActivity.get();
++    if (activity == null) {
++      return null;
++    }
++    final BlockingQueue<String> answer = new ArrayBlockingQueue<>(1);
++    new Handler(Looper.getMainLooper())
++        .post(
++            () -> {
++              final EditText input = new EditText(activity);
++              input.setInputType(
++                  InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
++              final StringBuilder message =
++                  new StringBuilder("Enter the PIN of your security key to continue for ")
++                      .append(rpId)
++                      .append('.');
++              if (note != null) {
++                message.append(' ').append(note);
++              }
++              new AlertDialog.Builder(activity)
++                  .setTitle("Security key PIN")
++                  .setMessage(message.toString())
++                  .setView(input)
++                  .setCancelable(false)
++                  .setPositiveButton(
++                      android.R.string.ok,
++                      (dialog, which) -> answer.offer(input.getText().toString()))
++                  .setNegativeButton(android.R.string.cancel, (dialog, which) -> answer.offer(""))
++                  .show();
++            });
++    try {
++      final String pin = answer.poll(2, TimeUnit.MINUTES);
++      return pin == null || pin.isEmpty() ? null : pin;
++    } catch (final InterruptedException e) {
++      Thread.currentThread().interrupt();
++      return null;
++    }
 +  }
 +
 +  /**
@@ -3058,10 +3525,10 @@ index efb17c0e3b..54872b2233 100644
  }
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
 new file mode 100644
-index 0000000000..1c5bb53dbe
+index 0000000000..5aaafe91bb
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,278 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -3299,13 +3766,53 @@ index 0000000000..1c5bb53dbe
 +      // expected
 +    }
 +  }
++
++  @Test
++  public void makeCredential_withPinAuth_carriesKeys8And9() {
++    final byte[] pinAuth = new byte[16];
++    for (int i = 0; i < 16; i++) {
++      pinAuth[i] = (byte) (0xF0 + i);
++    }
++    final CBORObject m =
++        CBORObject.DecodeFromBytes(
++            Ctap2Cbor.encodeMakeCredential(
++                CHALLENGE, "proton.me", "Proton", new byte[8], "u", "U",
++                Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)),
++                Collections.<Ctap2Cbor.CredentialId>emptyList(), true, true, pinAuth));
++    assertArrayEquals(pinAuth, m.get(8).GetByteString());
++    assertEquals(1, m.get(9).AsInt32()); // pinUvAuthProtocol id
++    // Without a pinAuth the keys are OMITTED (auth-rs omit-optional semantics), not null-valued.
++    final CBORObject plain =
++        CBORObject.DecodeFromBytes(
++            Ctap2Cbor.encodeMakeCredential(
++                CHALLENGE, "proton.me", "Proton", new byte[8], "u", "U",
++                Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)),
++                null, true, true));
++    assertNull(plain.get(8));
++    assertNull(plain.get(9));
++  }
++
++  @Test
++  public void getAssertion_withPinAuth_carriesKeys6And7() {
++    final byte[] pinAuth = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
++    final CBORObject m =
++        CBORObject.DecodeFromBytes(
++            Ctap2Cbor.encodeGetAssertion("proton.me", CHALLENGE, null, null, true, pinAuth));
++    assertArrayEquals(pinAuth, m.get(6).GetByteString());
++    assertEquals(1, m.get(7).AsInt32());
++    final CBORObject plain =
++        CBORObject.DecodeFromBytes(
++            Ctap2Cbor.encodeGetAssertion("proton.me", CHALLENGE, null, null, true));
++    assertNull(plain.get(6));
++    assertNull(plain.get(7));
++  }
 +}
-diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
 new file mode 100644
-index 0000000000..e58e6c8067
+index 0000000000..b3a35c1073
 --- /dev/null
-+++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
-@@ -0,0 +1,176 @@
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
+@@ -0,0 +1,206 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -3315,6 +3822,220 @@ index 0000000000..e58e6c8067
 +
 +import static org.junit.Assert.assertArrayEquals;
 +import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.fail;
++
++import com.upokecenter.cbor.CBOREncodeOptions;
++import com.upokecenter.cbor.CBORObject;
++import java.nio.charset.StandardCharsets;
++import java.security.KeyPair;
++import java.security.interfaces.ECPrivateKey;
++import java.security.interfaces.ECPublicKey;
++import java.util.ArrayList;
++import java.util.List;
++import org.junit.Test;
++
++/**
++ * pinUvAuthProtocol-1 (ClientPIN) checks. Primitives are pinned to external known answers (RFC
++ * 4231 HMAC test case 1, FIPS-197/SP 800-38A AES-256-CBC vector, published SHA-256("123456"));
++ * the handshake runs against a scripted fake authenticator that derives its side of the ECDH
++ * independently — the peer-simulation pattern that the framing bug needed and never had.
++ */
++public class PinProtocolOneTest {
++
++  private static final CBOREncodeOptions CANONICAL = CBOREncodeOptions.DefaultCtap2Canonical;
++
++  private static String hex(final byte[] in) {
++    final StringBuilder sb = new StringBuilder();
++    for (final byte b : in) {
++      sb.append(String.format("%02x", b));
++    }
++    return sb.toString();
++  }
++
++  private static byte[] hexBytes(final String hex) {
++    final byte[] out = new byte[hex.length() / 2];
++    for (int i = 0; i < out.length; i++) {
++      out[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
++    }
++    return out;
++  }
++
++  @Test
++  public void authenticateMatchesRfc4231AndTruncatesTo16() {
++    // RFC 4231 test case 1 (HMAC-SHA-256): key = 20 x 0x0b, data = "Hi There"; the published
++    // tag begins b0344c61d8db38535ca8afceaf0bf12b (also cross-checked against CPython hashlib)
++    // — authenticate returns exactly its first 16 bytes.
++    final byte[] key = new byte[20];
++    java.util.Arrays.fill(key, (byte) 0x0b);
++    final byte[] mac = PinProtocolOne.authenticate(key, "Hi There".getBytes(StandardCharsets.UTF_8));
++    assertEquals(16, mac.length);
++    assertEquals("b0344c61d8db38535ca8afceaf0bf12b", hex(mac));
++  }
++
++  @Test
++  public void pinHashMatchesKnownSha256Truncation() {
++    // SHA-256("123456") = 8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92;
++    // the wire sends only the first 16 bytes (auth-rs for_pin_token parity).
++    assertEquals("8d969eef6ecad3c29a3a629280e686cf", hex(PinProtocolOne.pinHash("123456")));
++    assertEquals(16, PinProtocolOne.pinHash("4711").length);
++  }
++
++  @Test
++  public void aesCbcMatchesSp80038aVector() {
++    // SP 800-38A F.2.1 first block (AES-256-CBC, NIST-published):
++    // key 603deb...dff4, IV 000102...0e0f, PT 6bc1bee22e409f96e93d7e117393172a
++    // CT f58c4c04d6e5f1ba779eabfb5f7bfbd6.
++    final byte[] key =
++        hexBytes("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
++    final byte[] iv = hexBytes("000102030405060708090a0b0c0d0e0f");
++    final byte[] pt = hexBytes("6bc1bee22e409f96e93d7e117393172a");
++    assertEquals("f58c4c04d6e5f1ba779eabfb5f7bfbd6", hex(PinProtocolOne.aesCbc(key, iv, pt, true)));
++    assertArrayEquals(
++        pt,
++        PinProtocolOne.aesCbc(
++            key, iv, hexBytes("f58c4c04d6e5f1ba779eabfb5f7bfbd6"), false));
++  }
++
++  @Test
++  public void ecdhSharedSecretIsSymmetricAnd32Bytes() {
++    final KeyPair a = PinProtocolOne.generatePlatformKey();
++    final KeyPair b = PinProtocolOne.generatePlatformKey();
++    final byte[] left =
++        PinProtocolOne.sharedSecret(
++            (ECPrivateKey) a.getPrivate(), (ECPublicKey) b.getPublic());
++    final byte[] right =
++        PinProtocolOne.sharedSecret(
++            (ECPrivateKey) b.getPrivate(), (ECPublicKey) a.getPublic());
++    assertEquals(32, left.length);
++    assertArrayEquals(left, right);
++  }
++
++  @Test
++  public void coseKeyRoundTripsPeerPublicKey() {
++    final KeyPair pair = PinProtocolOne.generatePlatformKey();
++    final ECPublicKey pub = (ECPublicKey) pair.getPublic();
++    final CBORObject cose = PinProtocolOne.toCoseKey(pub);
++    assertEquals(2, cose.get(1).AsInt32()); // kty EC2
++    assertEquals(1, cose.get(-1).AsInt32()); // crv P-256
++    assertEquals(32, cose.get(-2).GetByteString().length);
++    assertEquals(32, cose.get(-3).GetByteString().length);
++    assertArrayEquals(pub.getEncoded(), PinProtocolOne.peerPublicKey(cose).getEncoded());
++  }
++
++  /** Scripted authenticator side: derives its own ECDH half and answers the two sub-commands. */
++  private static final class FakeKeySession implements Ctap2Session {
++    final KeyPair pair = PinProtocolOne.generatePlatformKey();
++    final byte[] pinToken = hexBytes("00112233445566778899aabbccddeeff");
++    final List<CBORObject> requests = new ArrayList<CBORObject>();
++    byte[] decryptedPinHash;
++    boolean rejectPin = false;
++
++    @Override
++    public boolean prepare() {
++      return true;
++    }
++
++    @Override
++    public byte[] send(final int cmd, final byte[] cborPayload) {
++      assertEquals(PinProtocolOne.CTAP_CLIENT_PIN, cmd);
++      final CBORObject req = CBORObject.DecodeFromBytes(cborPayload);
++      requests.add(req);
++      assertEquals(1, req.get(1).AsInt32()); // pinUvAuthProtocol 1 always
++      if (req.get(2).AsInt32() == 2) { // GetKeyAgreement
++        final CBORObject resp = CBORObject.NewMap();
++        resp.Add(
++            CBORObject.FromObject(1),
++            PinProtocolOne.toCoseKey((ECPublicKey) pair.getPublic()));
++        return resp.EncodeToBytes(CANONICAL);
++      }
++      // GetPinToken: check shape, open pinHashEnc with OUR half of the shared secret.
++      assertEquals(3, req.get(2).AsInt32());
++      assertEquals(4, req.size()); // exactly {1, 2, 3, 6} — no null-valued optionals
++      final CBORObject platKey = req.get(3);
++      assertEquals(32, platKey.get(-2).GetByteString().length);
++      final byte[] pinHashEnc = req.get(6).GetByteString();
++      assertEquals(16, pinHashEnc.length);
++      final byte[] secret =
++          PinProtocolOne.sharedSecret(
++              (ECPrivateKey) pair.getPrivate(), PinProtocolOne.peerPublicKey(platKey));
++      decryptedPinHash = PinProtocolOne.aesCbc(secret, pinHashEnc, false);
++      if (rejectPin) {
++        throw new Ctap2Error("PIN_INVALID", PinProtocolOne.STATUS_PIN_INVALID, null);
++      }
++      final CBORObject resp = CBORObject.NewMap();
++      resp.Add(
++          CBORObject.FromObject(2),
++          CBORObject.FromObject(PinProtocolOne.aesCbc(secret, pinToken, true)));
++      return resp.EncodeToBytes(CANONICAL);
++    }
++
++    @Override
++    public void close() {}
++  }
++
++  @Test
++  public void obtainPinTokenHandshakeCompletesAgainstIndependentPeer() {
++    final FakeKeySession key = new FakeKeySession();
++    final byte[] token = PinProtocolOne.obtainPinToken(key, "123456");
++    assertArrayEquals(key.pinToken, token);
++    // The key must have recovered exactly the 16-byte pin hash — the PIN itself never goes on
++    // the wire, and both halves of the ECDH secret had to agree for this to open at all.
++    assertArrayEquals(PinProtocolOne.pinHash("123456"), key.decryptedPinHash);
++    assertEquals(2, key.requests.size());
++    assertEquals(2, key.requests.get(0).size()); // GetKeyAgreement: {1, 2}
++    assertEquals(2, key.requests.get(0).get(2).AsInt32());
++    assertEquals(3, key.requests.get(1).get(2).AsInt32()); // GetPinToken
++  }
++
++  @Test
++  public void wrongPinPropagatesPinInvalidStatus() {
++    final FakeKeySession key = new FakeKeySession();
++    key.rejectPin = true;
++    try {
++      PinProtocolOne.obtainPinToken(key, "0000");
++      fail("expected Ctap2Error for a rejected PIN");
++    } catch (final Ctap2Error e) {
++      assertEquals(PinProtocolOne.STATUS_PIN_INVALID, e.getCtapStatus());
++    }
++  }
++
++  @Test
++  public void clientPinEncodingsAreCanonicalAndShaped() {
++    // GetKeyAgreement is {1: 1, 2: 2} — its exact canonical bytes are two one-byte entries.
++    assertEquals("a201010202", hex(Ctap2Cbor.encodeClientPinGetKeyAgreement()));
++
++    final CBORObject platKey = CBORObject.NewMap();
++    platKey.Add(CBORObject.FromObject(1), CBORObject.FromObject(2));
++    platKey.Add(CBORObject.FromObject(-1), CBORObject.FromObject(1));
++    platKey.Add(CBORObject.FromObject(-2), CBORObject.FromObject(new byte[32]));
++    platKey.Add(CBORObject.FromObject(-3), CBORObject.FromObject(new byte[32]));
++    final CBORObject m =
++        CBORObject.DecodeFromBytes(
++            Ctap2Cbor.encodeClientPinGetPinToken(platKey, new byte[16]));
++    assertEquals(4, m.size());
++    assertEquals(1, m.get(1).AsInt32());
++    assertEquals(3, m.get(2).AsInt32());
++    assertArrayEquals(new byte[16], m.get(6).GetByteString());
++    assertArrayEquals(new byte[32], m.get(3).get(-2).GetByteString());
++  }
++}
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
+new file mode 100644
+index 0000000000..d32100dbff
+--- /dev/null
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2FramingTest.java
+@@ -0,0 +1,248 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++package org.mozilla.gecko.ctap2;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
 +
 +import java.io.ByteArrayOutputStream;
 +import java.nio.ByteBuffer;
@@ -3436,6 +4157,76 @@ index 0000000000..e58e6c8067
 +    assertEquals(57, UsbCtap2Transport.outPayloadCapacity(64, 0));
 +    assertEquals(59, UsbCtap2Transport.outPayloadCapacity(64, 1));
 +    assertEquals(59, UsbCtap2Transport.outPayloadCapacity(64, 2));
++  }
++
++  // ---------------------------------------------------------------- inbound reassembly
++  // fillContinuations is the INBOUND twin of the outbound slicing bug: the first makeCredential
++  // success will be the first multi-kilobyte response the stack has ever received, and until these
++  // tests the loop bookkeeping had never run anywhere but on a speculative read.
++
++  private static ByteBuffer contReport(final int cid, final int seq, final byte[] payload) {
++    final ByteBuffer c = ByteBuffer.allocate(64);
++    c.putInt(cid);
++    c.put((byte) seq);
++    c.put(payload);
++    c.rewind();
++    return c;
++  }
++
++  private static UsbCtap2Transport.InboundReportSource queueSource(
++      final java.util.List<ByteBuffer> scripted) {
++    return () -> scripted.isEmpty() ? null : scripted.remove(0);
++  }
++
++  @Test
++  public void inboundContinuationsReassembleThreeReportResponse() {
++    // A 140-byte response: first report 57 B, continuations 59 B then 24 B.
++    final byte[] payload = new byte[140];
++    for (int i = 0; i < 140; i++) {
++      payload[i] = (byte) (i * 7 + 3);
++    }
++    final java.util.List<ByteBuffer> q = new java.util.ArrayList<ByteBuffer>();
++    q.add(contReport(0x42, 0, java.util.Arrays.copyOfRange(payload, 57, 116)));
++    q.add(contReport(0x42, 1, java.util.Arrays.copyOfRange(payload, 116, 140)));
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    UsbCtap2Transport.readPayloadInto(
++        body, report(0x42, 0x91, 140, java.util.Arrays.copyOfRange(payload, 0, 57)), 140, 7);
++    assertEquals(57, body.size());
++    assertTrue(UsbCtap2Transport.fillContinuations(queueSource(q), 0x42, body, 140));
++    assertArrayEquals(payload, body.toByteArray());
++  }
++
++  @Test
++  public void inboundSkipsKeepaliveForeignChannelAndOutOfOrderReports() {
++    // A 140-byte response (57 + 59 + 24) with noise before and between the real continuations:
++    // a foreign channel, a keepalive first-report, and an early wrong-SEQ packet must all be
++    // skipped without desynchronising the stream.
++    final byte[] payload = new byte[140];
++    for (int i = 0; i < 140; i++) {
++      payload[i] = (byte) (251 - i);
++    }
++    final java.util.List<ByteBuffer> q = new java.util.ArrayList<ByteBuffer>();
++    q.add(contReport(0x99, 0, new byte[59])); // foreign channel: skipped
++    q.add(report(0x42, 0xBB, 1, new byte[] {0x02})); // keepalive first-report: byte 4 = 0xBB,
++    // never matches a continuation SEQ, skipped
++    q.add(contReport(0x42, 1, java.util.Arrays.copyOfRange(payload, 116, 140))); // SEQ 1 while
++    // nextSeq is still 0: skipped
++    q.add(contReport(0x42, 0, java.util.Arrays.copyOfRange(payload, 57, 116))); // SEQ 0
++    q.add(contReport(0x42, 1, java.util.Arrays.copyOfRange(payload, 116, 140))); // SEQ 1 completes
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    UsbCtap2Transport.readPayloadInto(
++        body, report(0x42, 0x91, 140, java.util.Arrays.copyOfRange(payload, 0, 57)), 140, 7);
++    assertTrue(UsbCtap2Transport.fillContinuations(queueSource(q), 0x42, body, 140));
++    assertArrayEquals(payload, body.toByteArray());
++    assertTrue(q.isEmpty()); // consumed exactly through the last real report
++  }
++
++  @Test
++  public void inboundTransportFailureMidMessageReturnsFalse() {
++    final java.util.List<ByteBuffer> q = new java.util.ArrayList<ByteBuffer>(); // empty: transport dies
++    final ByteArrayOutputStream body = new ByteArrayOutputStream();
++    UsbCtap2Transport.readPayloadInto(body, report(0x42, 0x91, 116, new byte[57]), 116, 7);
++    assertFalse(UsbCtap2Transport.fillContinuations(queueSource(q), 0x42, body, 116));
 +  }
 +
 +  @Test
