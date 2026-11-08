@@ -61,12 +61,12 @@ index 83bfdf85e6..186a662b15 100644
      <uses-feature
              android:name="android.hardware.camera.autofocus"
              android:required="false"/>
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 new file mode 100644
-index 0000000000..1b1e0568bf
+index 0000000000..8e6c938d7e
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,409 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -77,6 +77,7 @@ index 0000000000..1b1e0568bf
 +import com.upokecenter.cbor.CBORObject;
 +import com.upokecenter.cbor.CBORType;
 +import java.util.List;
++import java.util.Map;
 +
 +/**
 + * Minimal CBOR codec for the two CTAP2 commands the browser needs, per the CTAP2 spec's normative
@@ -185,18 +186,18 @@ index 0000000000..1b1e0568bf
 +   * AppID extension) is sent as the "appid" extension when non-null; per WebAuthn L2 section 10.1
 +   * the caller must also have substituted the AppID for rpId.
 +   *
-+   * <p>"up" (user presence) is always true for a roaming security key. "uv" is sent only when the
-+   * relying party REQUIRES user verification — a plain key has no local gesture and an unrequested
-+   * uv:true is rejected with CTAP2_ERR_UNSUPPORTED_OPTION.
++   * <p>Options are caller-composed from the key's authenticatorGetInfo report — the encoder never
++   * invents any. "up" is normative true and is not sent (conformance clients do not send it); an
++   * option the key did not declare gets the request rejected with 0x2B/0x2C. Null/empty omits the
++   * options parameter entirely (spec defaults).
 +   */
 +  public static byte[] encodeGetAssertion(
 +      final String rpId,
 +      final byte[] clientDataHash,
 +      final List<CredentialId> allowCredentials,
 +      final String appId,
-+      final boolean userVerificationRequired) {
-+    return encodeGetAssertion(rpId, clientDataHash, allowCredentials, appId,
-+        userVerificationRequired, null);
++      final Map<String, Boolean> options) {
++    return encodeGetAssertion(rpId, clientDataHash, allowCredentials, appId, options, null);
 +  }
 +
 +  /**
@@ -209,7 +210,7 @@ index 0000000000..1b1e0568bf
 +      final byte[] clientDataHash,
 +      final List<CredentialId> allowCredentials,
 +      final String appId,
-+      final boolean userVerificationRequired,
++      final Map<String, Boolean> options,
 +      final byte[] pinAuth) {
 +    final CBORObject map = CBORObject.NewMap();
 +    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(rpId));
@@ -230,12 +231,14 @@ index 0000000000..1b1e0568bf
 +      ext.Add(CBORObject.FromObject("appid"), CBORObject.FromObject(appId));
 +      map.Add(CBORObject.FromObject(4), ext);
 +    }
-+    final CBORObject opts = CBORObject.NewMap();
-+    opts.Add(CBORObject.FromObject("up"), CBORObject.FromObject(true));
-+    if (userVerificationRequired) {
-+      opts.Add(CBORObject.FromObject("uv"), CBORObject.FromObject(true));
++    if (options != null && !options.isEmpty()) {
++      final CBORObject opts = CBORObject.NewMap();
++      for (final Map.Entry<String, Boolean> option : options.entrySet()) {
++        opts.Add(CBORObject.FromObject(option.getKey()),
++            CBORObject.FromObject(option.getValue().booleanValue()));
++      }
++      map.Add(CBORObject.FromObject(5), opts);
 +    }
-+    map.Add(CBORObject.FromObject(5), opts);
 +    if (pinAuth != null) {
 +      map.Add(CBORObject.FromObject(6), CBORObject.FromObject(pinAuth));
 +      map.Add(CBORObject.FromObject(7), CBORObject.FromObject(1)); // pinUvAuthProtocol id
@@ -308,11 +311,10 @@ index 0000000000..1b1e0568bf
 +      final String userDisplayName,
 +      final List<PublicKeyCredParam> pubKeyCredParams,
 +      final List<CredentialId> excludeList,
-+      final boolean residentKey,
-+      final boolean userVerificationRequired) {
++      final Map<String, Boolean> options) {
 +    return encodeMakeCredential(
 +        clientDataHash, rpId, rpName, userId, userName, userDisplayName, pubKeyCredParams,
-+        excludeList, residentKey, userVerificationRequired, null);
++        excludeList, options, null);
 +  }
 +
 +  /**
@@ -328,8 +330,7 @@ index 0000000000..1b1e0568bf
 +      final String userDisplayName,
 +      final List<PublicKeyCredParam> pubKeyCredParams,
 +      final List<CredentialId> excludeList,
-+      final boolean residentKey,
-+      final boolean userVerificationRequired,
++      final Map<String, Boolean> options,
 +      final byte[] pinAuth) {
 +    final CBORObject map = CBORObject.NewMap();
 +    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(clientDataHash));
@@ -374,15 +375,15 @@ index 0000000000..1b1e0568bf
 +      map.Add(CBORObject.FromObject(5), arr);
 +    }
 +
-+    final CBORObject opts = CBORObject.NewMap();
-+    opts.Add(CBORObject.FromObject("up"), CBORObject.FromObject(true));
-+    if (residentKey) {
-+      opts.Add(CBORObject.FromObject("rk"), CBORObject.FromObject(true));
++    if (options != null && !options.isEmpty()) {
++      // Options are caller-composed from the key's GetInfo report; "up" is normative and not sent.
++      final CBORObject opts = CBORObject.NewMap();
++      for (final Map.Entry<String, Boolean> option : options.entrySet()) {
++        opts.Add(CBORObject.FromObject(option.getKey()),
++            CBORObject.FromObject(option.getValue().booleanValue()));
++      }
++      map.Add(CBORObject.FromObject(7), opts);
 +    }
-+    if (userVerificationRequired) {
-+      opts.Add(CBORObject.FromObject("uv"), CBORObject.FromObject(true));
-+    }
-+    map.Add(CBORObject.FromObject(7), opts);
 +    if (pinAuth != null) {
 +      map.Add(CBORObject.FromObject(8), CBORObject.FromObject(pinAuth));
 +      map.Add(CBORObject.FromObject(9), CBORObject.FromObject(1)); // pinUvAuthProtocol id
@@ -391,7 +392,7 @@ index 0000000000..1b1e0568bf
 +  }
 +
 +  /**
-+   * authenticatorClientPIN (0x04) GetKeyAgreement sub-request for pinUvAuthProtocol 1: {@code
++   * authenticatorClientPIN (0x06) GetKeyAgreement sub-request for pinUvAuthProtocol 1: {@code
 +   * {1: 1, 2: 0x02}}. Message shapes mirror the production Rust client (auth-rs client_pin.rs):
 +   * optional keys are omitted, not nulled.
 +   */
@@ -403,14 +404,14 @@ index 0000000000..1b1e0568bf
 +  }
 +
 +  /**
-+   * authenticatorClientPIN GetPinToken sub-request: {@code {1: 1, 2: 0x03, 3: platformKeyAgreement
++   * authenticatorClientPIN GetPinToken sub-request: {@code {1: 1, 2: 0x05, 3: platformKeyAgreement
 +   * (COSE EC2 map), 6: pinHashEnc (AES-256-CBC of the 16-byte pin hash)}}.
 +   */
 +  public static byte[] encodeClientPinGetPinToken(
 +      final CBORObject platformKeyAgreement, final byte[] pinHashEnc) {
 +    final CBORObject map = CBORObject.NewMap();
 +    map.Add(CBORObject.FromObject(1), CBORObject.FromObject(1));
-+    map.Add(CBORObject.FromObject(2), CBORObject.FromObject(3)); // subCommand GetPinToken
++    map.Add(CBORObject.FromObject(2), CBORObject.FromObject(5)); // subCommand GetPinToken (spec 5.5.7; 0x03 is setPIN)
 +    map.Add(CBORObject.FromObject(3), platformKeyAgreement);
 +    map.Add(CBORObject.FromObject(6), CBORObject.FromObject(pinHashEnc));
 +    return map.EncodeToBytes(CTAP2_CANONICAL);
@@ -475,12 +476,12 @@ index 0000000000..1b1e0568bf
 +    throw new IllegalStateException("CTAP2 response field " + field + " is not a byte string");
 +  }
 +}
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
 new file mode 100644
-index 0000000000..96950a017d
+index 0000000000..66179fd1c0
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,81 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -510,13 +511,64 @@ index 0000000000..96950a017d
 +  public int getCtapStatus() {
 +    return mCtapStatus;
 +  }
++
++  /**
++   * Official name of a CTAP2 status byte (CTAP 2.0 section 6.1 base error values; the table was
++   * taken from the published FIDO Alliance spec, not guessed). Diagnostics only — routing uses
++   * {@link #getCtapStatus()}.
++   */
++  public static String describe(final int status) {
++    switch (status) {
++      case 0x00: return "OK";
++      case 0x11: return "CBOR_UNEXPECTED_TYPE";
++      case 0x12: return "INVALID_CBOR";
++      case 0x14: return "MISSING_PARAMETER";
++      case 0x15: return "LIMIT_EXCEEDED";
++      case 0x16: return "UNSUPPORTED_EXTENSION";
++      case 0x19: return "CREDENTIAL_EXCLUDED";
++      case 0x21: return "PROCESSING";
++      case 0x22: return "INVALID_CREDENTIAL";
++      case 0x23: return "USER_ACTION_PENDING";
++      case 0x24: return "OPERATION_PENDING";
++      case 0x25: return "NO_OPERATIONS";
++      case 0x26: return "UNSUPPORTED_ALGORITHM";
++      case 0x27: return "OPERATION_DENIED";
++      case 0x28: return "KEY_STORE_FULL";
++      case 0x2A: return "NO_OPERATION_PENDING";
++      case 0x2B: return "UNSUPPORTED_OPTION";
++      case 0x2C: return "INVALID_OPTION";
++      case 0x2D: return "KEEPALIVE_CANCEL";
++      case 0x2E: return "NO_CREDENTIALS";
++      case 0x2F: return "USER_ACTION_TIMEOUT";
++      case 0x30: return "NOT_ALLOWED";
++      case 0x31: return "PIN_INVALID";
++      case 0x32: return "PIN_BLOCKED";
++      case 0x33: return "PIN_AUTH_INVALID";
++      case 0x34: return "PIN_AUTH_BLOCKED";
++      case 0x35: return "PIN_NOT_SET";
++      case 0x36: return "PIN_REQUIRED";
++      case 0x37: return "PIN_POLICY_VIOLATION";
++      case 0x38: return "PIN_TOKEN_EXPIRED";
++      case 0x39: return "REQUEST_TOO_LARGE";
++      case 0x3A: return "ACTION_TIMEOUT";
++      case 0x3B: return "UP_REQUIRED";
++      default:
++        if (status >= 0xE0 && status <= 0xEF) {
++          return "EXTENSION_RANGE";
++        }
++        if (status >= 0xF0) {
++          return "VENDOR_RANGE";
++        }
++        return "UNKNOWN";
++    }
++  }
 +}
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
 new file mode 100644
-index 0000000000..1b2763a616
+index 0000000000..7976be633d
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,51 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -540,6 +592,17 @@ index 0000000000..1b2763a616
 +  /** authenticatorGetAssertion (CTAP2 spec section 5.2). */
 +  int CTAP_GET_ASSERTION = 0x02;
 +
++  /**
++   * authenticatorGetInfo (CTAP2 spec section 5.4): the key's own capability report. The client
++   * MUST probe it before composing options — options the key did not declare are rejected with
++   * CTAP2_ERR_UNSUPPORTED_OPTION (0x2B) / CTAP2_ERR_INVALID_OPTION (0x2C). Request parameter is
++   * the empty CBOR map.
++   */
++  int CTAP_GET_INFO = 0x04;
++
++  /** The empty CBOR map (single byte 0xA0): authenticatorGetInfo's entire request. */
++  byte[] CBOR_EMPTY_MAP = new byte[] {(byte) 0xA0};
++
 +  /** Makes the authenticator reachable. Returns false when the key cannot be prepared. */
 +  boolean prepare() throws Ctap2Error;
 +
@@ -557,12 +620,12 @@ index 0000000000..1b2763a616
 +  /** Releases the transport (idempotent). */
 +  void close();
 +}
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
-index 0000000000..f89b06d387
+index 0000000000..5b027ad620
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,287 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -707,7 +770,9 @@ index 0000000000..f89b06d387
 +          "CTAP command 0x"
 +              + Integer.toHexString(ctapCmd)
 +              + " failed, status 0x"
-+              + Integer.toHexString(ctapStatus & 0xFF).toUpperCase(),
++              + Integer.toHexString(ctapStatus & 0xFF).toUpperCase()
++              + " "
++              + Ctap2Error.describe(ctapStatus),
 +          ctapStatus,
 +          null);
 +    }
@@ -848,9 +913,9 @@ index 0000000000..f89b06d387
 +    }
 +  }
 +}
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
 new file mode 100644
-index 0000000000..ee1a9c0e25
+index 0000000000..401b662f36
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
 @@ -0,0 +1,227 @@
@@ -883,7 +948,7 @@ index 0000000000..ee1a9c0e25
 +/**
 + * pinUvAuthProtocol 1 (CTAP2 spec sections 5.4, 5.5.1.1, 6.5, 6.6): an ECDH P-256 shared secret,
 + * AES-256-CBC with a zero IV and zero padding, and HMAC-SHA-256 truncated to 16 bytes. The
-+ * handshake rides authenticatorClientPIN (CTAP command 0x04) over an open {@link Ctap2Session}.
++ * handshake rides authenticatorClientPIN (CTAP command 0x06) over an open {@link Ctap2Session}.
 + *
 + * <p>Message shapes and crypto constants mirror the production Rust client that Firefox desktop
 + * runs against these same keys (authenticator crate: client_pin.rs, crypto/mod.rs), down to
@@ -896,7 +961,7 @@ index 0000000000..ee1a9c0e25
 + */
 +public final class PinProtocolOne {
 +  /** authenticatorClientPIN (CTAP2 spec section 5.4). */
-+  public static final int CTAP_CLIENT_PIN = 0x04;
++  public static final int CTAP_CLIENT_PIN = 0x06; // spec 5.5; 0x04 is authenticatorGetInfo
 +
 +  // PIN-family status codes (spec section 6.1; byte values verified against the auth-rs and
 +  // CTAP-2.2 mapping tables).
@@ -1081,12 +1146,12 @@ index 0000000000..ee1a9c0e25
 +    }
 +  }
 +}
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
-index 0000000000..befb0521ca
+index 0000000000..9503f0a81e
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
-@@ -0,0 +1,647 @@
+@@ -0,0 +1,649 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1447,7 +1512,9 @@ index 0000000000..befb0521ca
 +          "CTAP command 0x"
 +              + Integer.toHexString(ctapCmd)
 +              + " failed, status 0x"
-+              + Integer.toHexString(ctapStatus & 0xFF).toUpperCase(),
++              + Integer.toHexString(ctapStatus & 0xFF).toUpperCase()
++              + " "
++              + Ctap2Error.describe(ctapStatus),
 +          ctapStatus,
 +          null);
 +    }
@@ -1734,12 +1801,12 @@ index 0000000000..befb0521ca
 +    p.put((byte) (len & 0xFF));
 +  }
 +}
-diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
+diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..a3b95e6a33
+index 0000000000..e314e4580f
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,993 @@
+@@ -0,0 +1,1117 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1765,8 +1832,14 @@ index 0000000000..a3b95e6a33
 +import android.util.Log;
 +import android.widget.EditText;
 +import com.upokecenter.cbor.CBORObject;
++import com.upokecenter.cbor.CBORType;
 +import java.lang.ref.WeakReference;
++import java.util.ArrayList;
++import java.util.HashSet;
++import java.util.LinkedHashMap;
 +import java.util.List;
++import java.util.Map;
++import java.util.Set;
 +import java.util.concurrent.ArrayBlockingQueue;
 +import java.util.concurrent.BlockingQueue;
 +import java.util.concurrent.TimeUnit;
@@ -1830,7 +1903,14 @@ index 0000000000..a3b95e6a33
 +  private static WeakReference<Activity> sResumedActivity = new WeakReference<>(null);
 +  private static boolean sLifecycleHooked = false;
 +
-+  private static final Handler MAIN = new Handler(Looper.getMainLooper());
++  /*
++   * The main-thread Handler lives in a holder so touching the pure capability/option logic never
++   * initializes it: the android.jar Looper stub throws during class init on a plain JVM, and the
++   * GetInfo seam must stay unit-testable there (it is policy, not plumbing).
++   */
++  private static final class MainHolder {
++    static final Handler H = new Handler(Looper.getMainLooper());
++  }
 +
 +  private WebAuthnCtap2() {}
 +
@@ -1965,9 +2045,9 @@ index 0000000000..a3b95e6a33
 +    }
 +
 +    void cleanup() {
-+      MAIN.removeCallbacks(grantTimeout);
-+      MAIN.removeCallbacks(watchdog);
-+      MAIN.removeCallbacks(poll);
++      MainHolder.H.removeCallbacks(grantTimeout);
++      MainHolder.H.removeCallbacks(watchdog);
++      MainHolder.H.removeCallbacks(poll);
 +      synchronized (LOCK) {
 +        if (sPermissionOwner == this) {
 +          sPermissionOwner = null;
@@ -2010,7 +2090,7 @@ index 0000000000..a3b95e6a33
 +      sInFlight = true;
 +    }
 +    final FlowState flow = new FlowState(request);
-+    MAIN.post(
++    MainHolder.H.post(
 +        () -> {
 +          try {
 +            arm(flow);
@@ -2029,7 +2109,7 @@ index 0000000000..a3b95e6a33
 +    ensureActivityTracking();
 +
 +    flow.watchdog = () -> flow.settleError(new WebAuthnUtils.Exception("TIMEOUT_ERR"));
-+    MAIN.postDelayed(flow.watchdog, FLOW_WATCHDOG_MS);
++    MainHolder.H.postDelayed(flow.watchdog, FLOW_WATCHDOG_MS);
 +
 +    final UsbDevice attached = findUsbSecurityKey();
 +    if (attached != null) {
@@ -2081,8 +2161,8 @@ index 0000000000..a3b95e6a33
 +      }
 +    }
 +    unregisterAttachReceiver(flow);
-+    MAIN.removeCallbacks(flow.poll);
-+    MAIN.removeCallbacks(flow.grantTimeout);
++    MainHolder.H.removeCallbacks(flow.poll);
++    MainHolder.H.removeCallbacks(flow.grantTimeout);
 +
 +    final Thread worker =
 +        new Thread(
@@ -2234,11 +2314,11 @@ index 0000000000..a3b95e6a33
 +            flow.settleError(new WebAuthnUtils.Exception("NOT_ALLOWED_ERR"));
 +          }
 +        };
-+    MAIN.postDelayed(flow.grantTimeout, USB_GRANT_TIMEOUT_MS);
++    MainHolder.H.postDelayed(flow.grantTimeout, USB_GRANT_TIMEOUT_MS);
 +  }
 +
 +  private static void unregisterPermissionReceiver(final FlowState flow) {
-+    MAIN.removeCallbacks(flow.grantTimeout);
++    MainHolder.H.removeCallbacks(flow.grantTimeout);
 +    if (flow.permissionReceiver != null) {
 +      try {
 +        GeckoAppShell.getApplicationContext().unregisterReceiver(flow.permissionReceiver);
@@ -2291,11 +2371,11 @@ index 0000000000..a3b95e6a33
 +            if (device != null) {
 +              onLateUsbAttach(flow, device);
 +            } else if (System.currentTimeMillis() - startMs < LATE_ATTACH_WATCH_WINDOW_MS) {
-+              MAIN.postDelayed(this, LATE_ATTACH_POLL_INTERVAL_MS);
++              MainHolder.H.postDelayed(this, LATE_ATTACH_POLL_INTERVAL_MS);
 +            }
 +          }
 +        };
-+    MAIN.postDelayed(flow.poll, LATE_ATTACH_POLL_INTERVAL_MS);
++    MainHolder.H.postDelayed(flow.poll, LATE_ATTACH_POLL_INTERVAL_MS);
 +  }
 +
 +  /** A YubiKey attached while the flow is active: USB wins the race. */
@@ -2310,7 +2390,7 @@ index 0000000000..a3b95e6a33
 +      flow.nfcReader.stop(activity);
 +    }
 +    unregisterAttachReceiver(flow);
-+    MAIN.removeCallbacks(flow.poll);
++    MainHolder.H.removeCallbacks(flow.poll);
 +    if (hasUsbPermission(device)) {
 +      startUsbFlow(flow, device);
 +    } else {
@@ -2331,7 +2411,7 @@ index 0000000000..a3b95e6a33
 +
 +  private static void stopLateUsbWatch(final FlowState flow) {
 +    unregisterAttachReceiver(flow);
-+    MAIN.removeCallbacks(flow.poll);
++    MainHolder.H.removeCallbacks(flow.poll);
 +  }
 +
 +  // ---------------------------------------------------------------- exchange
@@ -2343,10 +2423,19 @@ index 0000000000..a3b95e6a33
 +      if (!session.prepare()) {
 +        throw new Ctap2Error("could not reach the FIDO2 authenticator on the security key");
 +      }
++      final KeyInfo info = fetchKeyInfo(session);
++      Log.i(
++          LOGTAG,
++          "security key capabilities: versions="
++              + info.versions
++              + " options="
++              + info.declaredOptions
++              + " pinUvAuthProtocols="
++              + info.pinUvAuthProtocols);
 +      final Object response =
 +          request.makeCredential
-+              ? doMakeCredential(request, session)
-+              : doGetAssertion(request, session);
++              ? doMakeCredential(request, session, info)
++              : doGetAssertion(request, session, info);
 +      flow.settleSuccess(response);
 +    } catch (final Exception e) {
 +      Log.e(LOGTAG, "security key operation failed", e);
@@ -2361,7 +2450,10 @@ index 0000000000..a3b95e6a33
 +  }
 +
 +  private static WebAuthnUtils.MakeCredentialResponse doMakeCredential(
-+      final Request request, final Ctap2Session session) {
++      final Request request, final Ctap2Session session, final KeyInfo info) {
++    final Map<String, Boolean> options =
++        makeCredentialOptions(
++            request.residentKeyRequested, request.userVerificationRequired, info);
 +    final byte[] cbor =
 +        Ctap2Cbor.encodeMakeCredential(
 +            request.clientDataHash,
@@ -2372,8 +2464,7 @@ index 0000000000..a3b95e6a33
 +            request.userDisplayName,
 +            request.pubKeyCredParams,
 +            request.excludeList,
-+            request.residentKeyRequested,
-+            request.userVerificationRequired);
++            options);
 +    byte[] body;
 +    try {
 +      body = session.send(Ctap2Session.CTAP_MAKE_CREDENTIAL, cbor);
@@ -2396,8 +2487,7 @@ index 0000000000..a3b95e6a33
 +                  request.userDisplayName,
 +                  request.pubKeyCredParams,
 +                  request.excludeList,
-+                  request.residentKeyRequested,
-+                  request.userVerificationRequired,
++                  options,
 +                  pinAuth));
 +    }
 +    final Ctap2Cbor.MakeCredentialResponse ctap = Ctap2Cbor.decodeMakeCredential(body);
@@ -2416,7 +2506,7 @@ index 0000000000..a3b95e6a33
 +  }
 +
 +  private static WebAuthnUtils.GetAssertionResponse doGetAssertion(
-+      final Request request, final Ctap2Session session) {
++      final Request request, final Ctap2Session session, final KeyInfo info) {
 +    // WebAuthn L2 10.1 (appid): the AppID replaces the RP id in the CTAP2 request so legacy
 +    // U2F credentials (scoped to the AppID) match; clientDataHash still covers the real origin.
 +    final String rpIdForKey =
@@ -2427,7 +2517,7 @@ index 0000000000..a3b95e6a33
 +            request.clientDataHash,
 +            request.allowList,
 +            request.appId,
-+            request.userVerificationRequired);
++            assertionOptions(request.userVerificationRequired, info));
 +    byte[] body;
 +    try {
 +      body = session.send(Ctap2Session.CTAP_GET_ASSERTION, cbor);
@@ -2446,7 +2536,7 @@ index 0000000000..a3b95e6a33
 +                  request.clientDataHash,
 +                  request.allowList,
 +                  request.appId,
-+                  request.userVerificationRequired,
++                  assertionOptions(request.userVerificationRequired, info),
 +                  pinAuth));
 +    }
 +    final Ctap2Cbor.GetAssertionResponse ctap =
@@ -2680,6 +2770,107 @@ index 0000000000..a3b95e6a33
 +              public void onActivityDestroyed(final Activity activity) {}
 +            });
 +    sLifecycleHooked = true;
++  }
++
++  // ---------------------------------------------------------------- capabilities
++
++  /*
++   * CTAP2 gives the client exactly one authoritative answer about what a key supports:
++   * authenticatorGetInfo (spec section 5.4). Every option in a makeCredential (key 7) or
++   * getAssertion (key 5) request must be one the key declared in that report; an option the key
++   * did not declare is rejected with UNSUPPORTED_OPTION (0x2B) / INVALID_OPTION (0x2C), which is
++   * how the 2026-11-08 "Operation is not supported" report surfaced: makeCredential died with
++   * 0x2C because we sent options we had guessed at instead of asking the key.
++   */
++
++  /** The capability report from authenticatorGetInfo (spec section 5.4). */
++  static final class KeyInfo {
++    final List<String> versions = new ArrayList<>();
++    final List<Integer> pinUvAuthProtocols = new ArrayList<>();
++    final Set<String> declaredOptions = new HashSet<>();
++  }
++
++  /** Probes the key. GetInfo is mandatory for CTAP2 keys (spec 5.4); asking is not guessing. */
++  static KeyInfo fetchKeyInfo(final Ctap2Session session) {
++    final byte[] body = session.send(Ctap2Session.CTAP_GET_INFO, Ctap2Session.CBOR_EMPTY_MAP);
++    final CBORObject root = CBORObject.DecodeFromBytes(body);
++    final KeyInfo info = new KeyInfo();
++    final CBORObject versions = root.get(CBORObject.FromObject(1));
++    if (versions != null && versions.getType() == CBORType.Array) {
++      for (int i = 0; i < versions.size(); i++) {
++        info.versions.add(versions.get(i).AsString());
++      }
++    }
++    final CBORObject options = root.get(CBORObject.FromObject(4));
++    if (options != null && options.getType() == CBORType.Map) {
++      for (final CBORObject name : options.getKeys()) {
++        if (options.get(name).isTrue()) {
++          info.declaredOptions.add(name.AsString());
++        }
++      }
++    }
++    final CBORObject pinProtocols = root.get(CBORObject.FromObject(5));
++    if (pinProtocols != null && pinProtocols.getType() == CBORType.Array) {
++      for (int i = 0; i < pinProtocols.size(); i++) {
++        info.pinUvAuthProtocols.add(Integer.valueOf(pinProtocols.get(i).AsInt32()));
++      }
++    }
++    if (info.versions.isEmpty()) {
++      throw new Ctap2Error("the security key sent an unusable authenticatorGetInfo response");
++    }
++    return info;
++  }
++
++  /**
++   * makeCredential options (CTAP2 key 7): only rk/uv the relying party asked for AND the key
++   * declared. "up" is never sent (normative true; conformance clients omit it).
++   */
++  static Map<String, Boolean> makeCredentialOptions(
++      final boolean residentKeyRequested,
++      final boolean userVerificationRequired,
++      final KeyInfo info) {
++    if (residentKeyRequested) {
++      requireDeclared(info, "rk", "discoverable (resident) credentials");
++    }
++    if (userVerificationRequired) {
++      requireDeclared(info, "uv", "user verification (PIN or biometric)");
++    }
++    final Map<String, Boolean> options = new LinkedHashMap<>();
++    if (residentKeyRequested) {
++      options.put("rk", Boolean.TRUE);
++    }
++    if (userVerificationRequired) {
++      options.put("uv", Boolean.TRUE);
++    }
++    return options.isEmpty() ? null : options;
++  }
++
++  /** getAssertion options (CTAP2 key 5): uv only when required by the RP and declared by the key. */
++  static Map<String, Boolean> assertionOptions(
++      final boolean userVerificationRequired, final KeyInfo info) {
++    if (!userVerificationRequired) {
++      return null;
++    }
++    requireDeclared(info, "uv", "user verification (PIN or biometric)");
++    final Map<String, Boolean> options = new LinkedHashMap<>();
++    options.put("uv", Boolean.TRUE);
++    return options;
++  }
++
++  private static void requireDeclared(
++      final KeyInfo info, final String option, final String what) {
++    if (!info.declaredOptions.contains(option)) {
++      // Status 0x2B (UNSUPPORTED_OPTION): the web seam must surface NotSupportedError naming the
++      // missing capability, not the old generic rejection.
++      throw new Ctap2Error(
++          "the security key does not support "
++              + what
++              + " (it did not declare options."
++              + option
++              + " in authenticatorGetInfo)",
++          0x2B,
++          null);
++    }
 +  }
 +
 +  // ---------------------------------------------------------------- sessions
@@ -3523,12 +3714,12 @@ index efb17c0e3b..54872b2233 100644
 -    return result;
    }
  }
-diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
+diff --git diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
 new file mode 100644
-index 0000000000..5aaafe91bb
+index 0000000000..13e2f5117e
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/Ctap2CborTest.java
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,292 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -3546,6 +3737,8 @@ index 0000000000..5aaafe91bb
 +import com.upokecenter.cbor.CBORObject;
 +import java.util.Arrays;
 +import java.util.Collections;
++import java.util.LinkedHashMap;
++import java.util.Map;
 +import org.junit.Test;
 +
 +/**
@@ -3572,7 +3765,7 @@ index 0000000000..5aaafe91bb
 +  public void getAssertion_requestCarriesRequiredFields() {
 +    final byte[] bytes =
 +        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE,
-+            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)), null, false);
++            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)), null, null);
 +    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
 +    assertEquals("example.com", map.get(1).AsString());
 +    assertArrayEquals(CHALLENGE, map.get(2).GetByteString());
@@ -3580,24 +3773,24 @@ index 0000000000..5aaafe91bb
 +    assertEquals("public-key", map.get(3).get(0).get("type").AsString());
 +    assertArrayEquals(CRED_ID, map.get(3).get(0).get("id").GetByteString());
 +    assertNull("no appid extension when appId is null", map.get(4));
-+    // options: up always true; uv only when required.
-+    assertEquals(Boolean.TRUE, map.get(5).get("up").AsBoolean());
-+    assertNull("uv omitted when not required", map.get(5).get("uv"));
++    // Options are caller-composed: null omits the parameter; "up" is normative and never sent.
++    assertNull("options omitted when null", map.get(5));
 +  }
 +
 +  @Test
 +  public void getAssertion_optionalFieldsAppearOnlyWhenRequested() {
 +    final byte[] uv =
-+        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE, null, "app.example.org", true);
++        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE, null, "app.example.org",
++            opt("uv"));
 +    final CBORObject map = CBORObject.DecodeFromBytes(uv);
 +    assertNull("allowList omitted when empty", map.get(3));
 +    assertEquals("app.example.org", map.get(4).get("appid").AsString());
 +    assertEquals(Boolean.TRUE, map.get(5).get("uv").AsBoolean());
 +
 +    final byte[] noAllow =
-+        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE, null, null, false);
++        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE, null, null, null);
 +    final CBORObject plain = CBORObject.DecodeFromBytes(noAllow);
-+    assertEquals(3, plain.size()); // only 1, 2, 5
++    assertEquals(2, plain.size()); // only 1, 2 — options parameter omitted
 +  }
 +
 +  @Test
@@ -3606,7 +3799,7 @@ index 0000000000..5aaafe91bb
 +        Ctap2Cbor.encodeGetAssertion("example.com", CHALLENGE,
 +            Arrays.asList(new Ctap2Cbor.CredentialId(CRED_ID),
 +                          new Ctap2Cbor.CredentialId(new byte[] {1, 1})),
-+            null, true);
++            null, opt("uv"));
 +    // Re-encoding the decoded map must be byte-identical (canonical key order
 +    // + minimal integer forms): an authenticator that canonicalizes before
 +    // comparing signatures over this bytes must agree with us.
@@ -3683,7 +3876,7 @@ index 0000000000..5aaafe91bb
 +        Ctap2Cbor.encodeMakeCredential(CHALLENGE, "example.com", "Example", USER_ID,
 +            "user", "User",
 +            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)), // ES256
-+            null, false, true);
++            null, opt("uv"));
 +    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
 +    assertArrayEquals(CHALLENGE, map.get(1).GetByteString());
 +    // rp / user: WebAuthn TEXT keys (id is bytes, names are text).
@@ -3696,8 +3889,9 @@ index 0000000000..5aaafe91bb
 +    assertEquals("public-key", map.get(4).get(0).get("type").AsString());
 +    assertEquals(-7, map.get(4).get(0).get("alg").AsInt32());
 +    assertNull("excludeList omitted when empty", map.get(5));
-+    // options at CTAP2 key 7: up always, uv only when required, rk absent.
-+    assertEquals(Boolean.TRUE, map.get(7).get("up").AsBoolean());
++    // Options at CTAP2 key 7 are exactly what the caller composed: "up" is normative and never
++    // sent (a key that has no opinion about undeclared options must not be provoked by it).
++    assertNull("up is never sent", map.get(7).get("up"));
 +    assertEquals(Boolean.TRUE, map.get(7).get("uv").AsBoolean());
 +    assertNull("rk omitted for non-resident", map.get(7).get("rk"));
 +  }
@@ -3707,7 +3901,7 @@ index 0000000000..5aaafe91bb
 +    final byte[] bytes =
 +        Ctap2Cbor.encodeMakeCredential(CHALLENGE, "example.com", null, USER_ID, null, null,
 +            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-257)), // RS256
-+            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)), true, false);
++            Collections.singletonList(new Ctap2Cbor.CredentialId(CRED_ID)), opt("rk"));
 +    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
 +    assertNull("rp.name omitted when null", map.get(2).get("name"));
 +    assertNull("user.name omitted when null", map.get(3).get("name"));
@@ -3726,8 +3920,9 @@ index 0000000000..5aaafe91bb
 +    final byte[] bytes =
 +        Ctap2Cbor.encodeMakeCredential(CHALLENGE, "example.com", "Example", USER_ID,
 +            "user", "User",
-+            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)), null, false, false);
++            Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)), null, null);
 +    final CBORObject map = CBORObject.DecodeFromBytes(bytes);
++    assertNull("no options requested means no options parameter", map.get(7));
 +    final byte algByte =
 +        map.get(4).get(0).get("alg").EncodeToBytes()[0];
 +    assertEquals("ES256 alg must be major type 1 (negative int)", 0x26, algByte);
@@ -3778,7 +3973,7 @@ index 0000000000..5aaafe91bb
 +            Ctap2Cbor.encodeMakeCredential(
 +                CHALLENGE, "proton.me", "Proton", new byte[8], "u", "U",
 +                Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)),
-+                Collections.<Ctap2Cbor.CredentialId>emptyList(), true, true, pinAuth));
++                Collections.<Ctap2Cbor.CredentialId>emptyList(), opt("rk", "uv"), pinAuth));
 +    assertArrayEquals(pinAuth, m.get(8).GetByteString());
 +    assertEquals(1, m.get(9).AsInt32()); // pinUvAuthProtocol id
 +    // Without a pinAuth the keys are OMITTED (auth-rs omit-optional semantics), not null-valued.
@@ -3787,7 +3982,7 @@ index 0000000000..5aaafe91bb
 +            Ctap2Cbor.encodeMakeCredential(
 +                CHALLENGE, "proton.me", "Proton", new byte[8], "u", "U",
 +                Collections.singletonList(new Ctap2Cbor.PublicKeyCredParam(-7)),
-+                null, true, true));
++                null, opt("rk", "uv")));
 +    assertNull(plain.get(8));
 +    assertNull(plain.get(9));
 +  }
@@ -3797,22 +3992,32 @@ index 0000000000..5aaafe91bb
 +    final byte[] pinAuth = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
 +    final CBORObject m =
 +        CBORObject.DecodeFromBytes(
-+            Ctap2Cbor.encodeGetAssertion("proton.me", CHALLENGE, null, null, true, pinAuth));
++            Ctap2Cbor.encodeGetAssertion("proton.me", CHALLENGE, null, null, opt("uv"),
++                pinAuth));
 +    assertArrayEquals(pinAuth, m.get(6).GetByteString());
 +    assertEquals(1, m.get(7).AsInt32());
 +    final CBORObject plain =
 +        CBORObject.DecodeFromBytes(
-+            Ctap2Cbor.encodeGetAssertion("proton.me", CHALLENGE, null, null, true));
++            Ctap2Cbor.encodeGetAssertion("proton.me", CHALLENGE, null, null, opt("uv")));
 +    assertNull(plain.get(6));
 +    assertNull(plain.get(7));
 +  }
++
++  /** Options builder for tests: every name maps to true (false-valued options are never sent). */
++  private static Map<String, Boolean> opt(final String... names) {
++    final Map<String, Boolean> options = new LinkedHashMap<>();
++    for (final String name : names) {
++      options.put(name, Boolean.TRUE);
++    }
++    return options;
++  }
 +}
-diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
+diff --git diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
 new file mode 100644
-index 0000000000..b3a35c1073
+index 0000000000..d307b33199
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
-@@ -0,0 +1,206 @@
+@@ -0,0 +1,208 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -3937,7 +4142,9 @@ index 0000000000..b3a35c1073
 +
 +    @Override
 +    public byte[] send(final int cmd, final byte[] cborPayload) {
-+      assertEquals(PinProtocolOne.CTAP_CLIENT_PIN, cmd);
++      // The command byte asserted against the SPEC (section 5.5), not our own constant: 0x04 is
++      // authenticatorGetInfo, which is exactly the bug that made the PIN handshake dead on device.
++      assertEquals("authenticatorClientPIN is CTAP command 0x06", 0x06, cmd);
 +      final CBORObject req = CBORObject.DecodeFromBytes(cborPayload);
 +      requests.add(req);
 +      assertEquals(1, req.get(1).AsInt32()); // pinUvAuthProtocol 1 always
@@ -3949,7 +4156,7 @@ index 0000000000..b3a35c1073
 +        return resp.EncodeToBytes(CANONICAL);
 +      }
 +      // GetPinToken: check shape, open pinHashEnc with OUR half of the shared secret.
-+      assertEquals(3, req.get(2).AsInt32());
++      assertEquals("getPINToken is subcommand 0x05 (0x03 is setPIN)", 5, req.get(2).AsInt32());
 +      assertEquals(4, req.size()); // exactly {1, 2, 3, 6} — no null-valued optionals
 +      final CBORObject platKey = req.get(3);
 +      assertEquals(32, platKey.get(-2).GetByteString().length);
@@ -3984,7 +4191,7 @@ index 0000000000..b3a35c1073
 +    assertEquals(2, key.requests.size());
 +    assertEquals(2, key.requests.get(0).size()); // GetKeyAgreement: {1, 2}
 +    assertEquals(2, key.requests.get(0).get(2).AsInt32());
-+    assertEquals(3, key.requests.get(1).get(2).AsInt32()); // GetPinToken
++    assertEquals(5, key.requests.get(1).get(2).AsInt32()); // getPINToken (spec 5.5.7)
 +  }
 +
 +  @Test
@@ -4014,7 +4221,7 @@ index 0000000000..b3a35c1073
 +            Ctap2Cbor.encodeClientPinGetPinToken(platKey, new byte[16]));
 +    assertEquals(4, m.size());
 +    assertEquals(1, m.get(1).AsInt32());
-+    assertEquals(3, m.get(2).AsInt32());
++    assertEquals(5, m.get(2).AsInt32());
 +    assertArrayEquals(new byte[16], m.get(6).GetByteString());
 +    assertArrayEquals(new byte[32], m.get(3).get(-2).GetByteString());
 +  }
@@ -4401,6 +4608,172 @@ index 0000000000..43526a16f3
 +            Arrays.asList(
 +                info(CLASS_SMART_CARD, 0x00, true, true, 16),
 +                info(CLASS_HID, PROTO_KEYBOARD, false, false, 64))));
++  }
++}
+diff --git diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java
+new file mode 100644
+index 0000000000..f607bc92bd
+--- /dev/null
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java
+@@ -0,0 +1,160 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.mozilla.gecko.ctap2;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.fail;
++
++import com.upokecenter.cbor.CBORObject;
++import java.util.Map;
++import org.junit.Test;
++
++/**
++ * The capability seam: options sent to a key must come from the key's own authenticatorGetInfo
++ * report, never from a guess. Scripted-key tests (the fake key composes and answers the GetInfo
++ * map itself) plus the request-shape assertions pin spec sections 5.1/5.2/5.4 behaviour.
++ */
++public class WebAuthnCtap2KeyInfoTest {
++
++  /** Scripted key: answers authenticatorGetInfo (and only that) with the canned CBOR body. */
++  private static final class InfoSession implements Ctap2Session {
++    private final byte[] mInfoBody;
++    int mLastCmd = -1;
++    byte[] mLastPayload;
++
++    InfoSession(final byte[] infoBody) {
++      mInfoBody = infoBody;
++    }
++
++    @Override
++    public boolean prepare() {
++      return true;
++    }
++
++    @Override
++    public byte[] send(final int ctapCmd, final byte[] cborPayload) {
++      mLastCmd = ctapCmd;
++      mLastPayload = cborPayload;
++      if (ctapCmd == CTAP_GET_INFO) {
++        assertArrayEquals("GetInfo request is the empty CBOR map", CBOR_EMPTY_MAP, cborPayload);
++        return mInfoBody;
++      }
++      throw new Ctap2Error("scripted key: unexpected command 0x" + Integer.toHexString(ctapCmd));
++    }
++
++    @Override
++    public void close() {}
++  }
++
++  /**
++   * Builds a key-side GetInfo body. Shape from the CTAP 2.0 spec section 5.4 response table
++   * (1=versions, 2=extensions, 4=options, 5=pinUvAuthProtocols); the readable sample map
++   * {1:["FIDO_2_0"], 2:["hmac-secret"], ...} printed in the spec pins versions/extensions.
++   */
++  private static byte[] infoBody(final boolean rk, final boolean uv, final boolean pinProtocols) {
++    final CBORObject info = CBORObject.NewMap();
++    info.set(CBORObject.FromObject(1), CBORObject.NewArray().Add("FIDO_2_0").Add("U2F_V2"));
++    info.set(CBORObject.FromObject(2), CBORObject.NewArray().Add("hmac-secret"));
++    final CBORObject options = CBORObject.NewMap();
++    options.set(CBORObject.FromObject("rk"), CBORObject.FromObject(rk));
++    options.set(CBORObject.FromObject("up"), CBORObject.FromObject(true));
++    options.set(CBORObject.FromObject("uv"), CBORObject.FromObject(uv));
++    info.set(CBORObject.FromObject(4), options);
++    if (pinProtocols) {
++      info.set(CBORObject.FromObject(5), CBORObject.NewArray().Add(1));
++    }
++    return info.EncodeToBytes();
++  }
++
++  @Test
++  public void fetchKeyInfo_parsesDeclaredCapabilities() {
++    final WebAuthnCtap2.KeyInfo info =
++        WebAuthnCtap2.fetchKeyInfo(new InfoSession(infoBody(true, false, true)));
++    assertTrue(info.versions.contains("FIDO_2_0"));
++    assertEquals(1, info.pinUvAuthProtocols.size());
++    assertEquals(Integer.valueOf(1), info.pinUvAuthProtocols.get(0));
++    assertTrue(info.declaredOptions.contains("rk"));
++    assertTrue(info.declaredOptions.contains("up"));
++    assertFalse("an option declared FALSE is not a declared option",
++        info.declaredOptions.contains("uv"));
++  }
++
++  @Test
++  public void fetchKeyInfo_unusableResponseThrows() {
++    try {
++      WebAuthnCtap2.fetchKeyInfo(new InfoSession(CBORObject.NewMap().Add(2, "x").EncodeToBytes()));
++      fail("expected Ctap2Error");
++    } catch (final Ctap2Error e) {
++      assertTrue(e.getMessage().contains("authenticatorGetInfo"));
++    }
++  }
++
++  @Test
++  public void makeCredentialOptions_sendsOnlyRequestedAndDeclared() {
++    final WebAuthnCtap2.KeyInfo both =
++        WebAuthnCtap2.fetchKeyInfo(new InfoSession(infoBody(true, true, true)));
++    final Map<String, Boolean> options = WebAuthnCtap2.makeCredentialOptions(true, true, both);
++    assertEquals(2, options.size());
++    assertEquals(Boolean.TRUE, options.get("rk"));
++    assertEquals(Boolean.TRUE, options.get("uv"));
++    assertNull("\"up\" is normative true: never sent", options.get("up"));
++  }
++
++  @Test
++  public void makeCredentialOptions_emptyRequestOmitsOptions() {
++    final WebAuthnCtap2.KeyInfo both =
++        WebAuthnCtap2.fetchKeyInfo(new InfoSession(infoBody(true, true, false)));
++    assertNull(WebAuthnCtap2.makeCredentialOptions(false, false, both));
++  }
++
++  @Test
++  public void makeCredentialOptions_neverSendsUndeclaredOptions() {
++    // This is the 2026-11-08 failure: the site asked for rk+uv, the key declared neither.
++    // Before the capability probe we sent the guess and the key answered 0x2C INVALID_OPTION.
++    final WebAuthnCtap2.KeyInfo plain =
++        WebAuthnCtap2.fetchKeyInfo(new InfoSession(infoBody(false, false, false)));
++    try {
++      WebAuthnCtap2.makeCredentialOptions(true, true, plain);
++      fail("expected Ctap2Error for undeclared rk");
++    } catch (final Ctap2Error e) {
++      assertEquals("must surface as NotSupportedError at the web seam", 0x2B, e.getCtapStatus());
++      assertTrue(e.getMessage().contains("options.rk"));
++    }
++  }
++
++  @Test
++  public void assertionOptions_uvOnlyWhenDeclared() {
++    final WebAuthnCtap2.KeyInfo uvCapable =
++        WebAuthnCtap2.fetchKeyInfo(new InfoSession(infoBody(false, true, true)));
++    final Map<String, Boolean> options = WebAuthnCtap2.assertionOptions(true, uvCapable);
++    assertEquals(1, options.size());
++    assertEquals(Boolean.TRUE, options.get("uv"));
++    assertNull(WebAuthnCtap2.assertionOptions(false, uvCapable));
++
++    final WebAuthnCtap2.KeyInfo noUv =
++        WebAuthnCtap2.fetchKeyInfo(new InfoSession(infoBody(false, false, true)));
++    try {
++      WebAuthnCtap2.assertionOptions(true, noUv);
++      fail("expected Ctap2Error for undeclared uv");
++    } catch (final Ctap2Error e) {
++      assertEquals(0x2B, e.getCtapStatus());
++      assertTrue(e.getMessage().contains("options.uv"));
++    }
++  }
++
++  @Test
++  public void getStatusDescriptionsMatchSpecTable() {
++    // The 2026-11-08 log said "status 0x2c"; this name is the CTAP 2.0 section 6.1 table.
++    assertEquals("INVALID_OPTION", Ctap2Error.describe(0x2C));
++    assertEquals("UNSUPPORTED_OPTION", Ctap2Error.describe(0x2B));
++    assertEquals("NO_CREDENTIALS", Ctap2Error.describe(0x2E));
++    assertEquals("PIN_REQUIRED", Ctap2Error.describe(0x36));
++    assertEquals("VENDOR_RANGE", Ctap2Error.describe(0xF7));
 +  }
 +}
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
