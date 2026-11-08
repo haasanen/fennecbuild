@@ -6,6 +6,13 @@
 set -e
 source "$(dirname "$0")/../../paths.sh"
 
+# Ubuntu 26.04 runner image (2026-11 refresh) ships GCC 15, whose libstdc++
+# stopped transitively including <cstdint>. wasi-sdk-20's LLVM predates the
+# upstream include fix and dies with uint64_t-not-declared cascades in
+# SmallVector.h (runs 42427084156/42429915223 after the WASI cache expired).
+# Force-include the header for the host-tool compile; a no-op on older GCC.
+export CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }-include cstdint"
+
 # Build WASI SDK (skip when the sysroot install exists, e.g. restored from cache)
 pushd "$wasi"
 if [ -d "$wasi/build/install/wasi/share/wasi-sysroot" ] && [ -e "$wasi/build/install/wasi/CI_DONE" ]; then
