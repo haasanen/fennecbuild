@@ -476,7 +476,7 @@ index 0000000000..8e6c938d7e
 +    throw new IllegalStateException("CTAP2 response field " + field + " is not a byte string");
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Error.java
 new file mode 100644
 index 0000000000..66179fd1c0
 --- /dev/null
@@ -563,7 +563,7 @@ index 0000000000..66179fd1c0
 +    }
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
 new file mode 100644
 index 0000000000..7976be633d
 --- /dev/null
@@ -620,7 +620,7 @@ index 0000000000..7976be633d
 +  /** Releases the transport (idempotent). */
 +  void close();
 +}
-diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
 index 0000000000..5b027ad620
 --- /dev/null
@@ -913,7 +913,7 @@ index 0000000000..5b027ad620
 +    }
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/PinProtocolOne.java
 new file mode 100644
 index 0000000000..401b662f36
 --- /dev/null
@@ -1146,12 +1146,12 @@ index 0000000000..401b662f36
 +    }
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
 new file mode 100644
-index 0000000000..9503f0a81e
+index 0000000000..72c6c5feb8
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/UsbCtap2Transport.java
-@@ -0,0 +1,649 @@
+@@ -0,0 +1,705 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -1264,6 +1264,10 @@ index 0000000000..9503f0a81e
 +        mProbeWaitsRemaining = -1;
 +        mInTimeoutMs = PACKET_TIMEOUT_MS;
 +        if (ok) {
++          // The probe's INIT allocated a channel; per spec 8.1.9.1.3 it is a fresh-CID-on-each-INIT
++          // world, and keys may age the probe channel out at any moment. Discard it: the session
++          // performs its own INIT (see {@link #initialize}).
++          mChannel = -1;
 +          Log.i(TAG, "CTAP interface bound (index " + intf.getId() + ", protocol 0x"
 +              + Integer.toHexString(intf.getInterfaceProtocol()) + ")");
 +          return true;
@@ -1450,12 +1454,16 @@ index 0000000000..9503f0a81e
 +  /**
 +   * Allocates a CTAPHID channel via INIT on the broadcast CID. Returns true on success; the
 +   * response must echo the request nonce (guards against a stale broadcast response from another
-+   * client). Idempotent: a channel already allocated by {@link #bindDevice} probing is kept.
++   * client). ALWAYS fresh: spec 8.1.9.1.3 defines INIT as allocating a NEW channel, so a channel
++   * allocated during {@link #bindDevice} probing is deliberately discarded there, and the session
++   * gets its own. Never trust a previously allocated channel across a bind.
 +   */
 +  public boolean initialize() {
-+    if (mChannel >= 0) {
-+      return true;
-+    }
++    return initializeIo(reportIo());
++  }
++
++  /** INIT over an explicit IO seam; instance state (mChannel) is still owned by this transport. */
++  boolean initializeIo(final ReportIo io) {
 +    final byte[] nonce = new byte[NONCE_SIZE];
 +    new SecureRandom().nextBytes(nonce);
 +    final ByteBuffer packet = newOutPacket();
@@ -1464,7 +1472,7 @@ index 0000000000..9503f0a81e
 +
 +    // expectedCid null: the INIT response carries the NEWLY ALLOCATED channel id, not
 +    // the broadcast CID; the nonce echo below is the freshness guard.
-+    final byte[] resp = transact(packet, CMD_INIT, null);
++    final byte[] resp = transactIo(io, packet, CMD_INIT, null);
 +    if (resp == null || resp.length < INIT_RESPONSE_SIZE) {
 +      return false;
 +    }
@@ -1478,6 +1486,7 @@ index 0000000000..9503f0a81e
 +            | ((resp[NONCE_SIZE + 1] & 0xFF) << 16)
 +            | ((resp[NONCE_SIZE + 2] & 0xFF) << 8)
 +            | (resp[NONCE_SIZE + 3] & 0xFF);
++    Log.i(TAG, "CTAPHID channel 0x" + Integer.toHexString(mChannel) + " allocated");
 +    final int caps = resp[NONCE_SIZE + 8] & 0xFF;
 +    if ((caps & CAPABILITY_CBOR) == 0) {
 +      Log.w(TAG, "device reports no CTAPHID_CBOR capability (caps=0x" + Integer.toHexString(caps) + ")");
@@ -1491,13 +1500,21 @@ index 0000000000..9503f0a81e
 +   * when the CTAP status is 0x00; otherwise throws {@link Ctap2Error} with the CTAP status code.
 +   */
 +  public byte[] sendCtapCommand(final int ctapCmd, final byte[] cborPayload) {
-+    if (mChannel < 0) {
-+      throw new Ctap2Error("USB channel not initialized");
++    return sendCtapCommandIo(reportIo(), ctapCmd, cborPayload);
++  }
++
++  byte[] sendCtapCommandIo(
++      final ReportIo io, final int ctapCmd, final byte[] cborPayload) {
++    // Spec 8.1.5.4: a CTAP2 CBOR command is legal only on an INIT-allocated channel. Enforce it
++    // HERE, not in callers: if no channel is held, allocate one now. Any future command (GetInfo
++    // probes included) is correct by construction regardless of call order.
++    if (mChannel < 0 && !initializeIo(io)) {
++      throw new Ctap2Error("the security key did not answer CTAPHID INIT");
 +    }
 +    final byte[] data = new byte[cborPayload.length + 1];
 +    data[0] = (byte) ctapCmd;
 +    System.arraycopy(cborPayload, 0, data, 1, cborPayload.length);
-+    final byte[] resp = transactMessage(CMD_CBOR, data);
++    final byte[] resp = transactMessageIo(io, mChannel, CMD_CBOR, data);
 +    if (resp == null) {
 +      throw new Ctap2Error("no USB response to CTAP command 0x" + Integer.toHexString(ctapCmd));
 +    }
@@ -1527,6 +1544,11 @@ index 0000000000..9503f0a81e
 +   * Keep-alive packets are skipped; a CTAPHID_ERROR throws {@link Ctap2Error}.
 +   */
 +  private byte[] transactMessage(final byte cmd, final byte[] data) {
++    return transactMessageIo(reportIo(), mChannel, cmd, data);
++  }
++
++  byte[] transactMessageIo(
++      final ReportIo io, final int cid, final byte cmd, final byte[] data) {
 +    final int total = data.length;
 +    int offset = 0;
 +    int packetIndex = 0;
@@ -1534,15 +1556,15 @@ index 0000000000..9503f0a81e
 +      final int chunk = Math.min(outPayloadCapacity(mReportSize, packetIndex), total - offset);
 +      final ByteBuffer packet = newOutPacket();
 +      if (packetIndex == 0) {
-+        putFirstPacketHeader(packet, mChannel, cmd, total);
++        putFirstPacketHeader(packet, cid, cmd, total);
 +      } else {
-+        packet.putInt(mChannel);
++        packet.putInt(cid);
 +        packet.put((byte) (packetIndex - 1)); // SEQ: first continuation is 0 (spec 8.1.9.1)
 +      }
 +      if (chunk > 0) {
 +        packet.put(data, offset, chunk);
 +      }
-+      if (!sendOut(packet)) {
++      if (!io.send(packet)) {
 +        return null;
 +      }
 +      offset += chunk;
@@ -1554,7 +1576,7 @@ index 0000000000..9503f0a81e
 +
 +    final ByteArrayOutputStream body = new ByteArrayOutputStream();
 +    while (true) {
-+      final ByteBuffer resp = waitForIn();
++      final ByteBuffer resp = io.recvReport();
 +      if (resp == null) {
 +        return null;
 +      }
@@ -1565,16 +1587,17 @@ index 0000000000..9503f0a81e
 +      }
 +      if (cmdByte == CMD_ERROR) {
 +        final int code = len >= 1 ? resp.get(FIRST_PAYLOAD_OFFSET) & 0xFF : -1;
-+        throw new Ctap2Error("USB CTAPHID error 0x" + Integer.toHexString(code).toUpperCase());
++        throw new Ctap2Error("USB CTAPHID error 0x" + Integer.toHexString(code).toUpperCase()
++            + " on channel 0x" + Integer.toHexString(cid));
 +      }
-+      if (cidOf(resp) != mChannel) {
++      if (cidOf(resp) != cid) {
 +        continue;
 +      }
 +      if (len < 1) {
 +        return null;
 +      }
 +      readPayloadInto(body, resp, len, FIRST_PAYLOAD_OFFSET);
-+      if (!fillContinuations(this::waitForIn, mChannel, body, len)) {
++      if (!fillContinuations(io::recvReport, cid, body, len)) {
 +        return null;
 +      }
 +      return body.toByteArray();
@@ -1616,12 +1639,45 @@ index 0000000000..9503f0a81e
 +   * Sends {@code packet} and returns the payload of the next non-keepalive response matching
 +   * {@code expectedCmd} on {@code expectedCid}, or null on failure. Used for INIT.
 +   */
++  private ReportIo reportIo() {
++    return new ReportIo() {
++      @Override
++      public boolean send(final ByteBuffer packet) {
++        return sendOut(packet);
++      }
++
++      @Override
++      public ByteBuffer recvReport() {
++        return waitForIn();
++      }
++    };
++  }
++
++  int channelForTest() {
++    return mChannel;
++  }
++
++  /** Report in/out seam; the JVM contract tests drive a scripted key through exactly this. */
++  interface ReportIo {
++    boolean send(ByteBuffer packet);
++
++    ByteBuffer recvReport();
++  }
++
 +  private byte[] transact(final ByteBuffer packet, final byte expectedCmd, final Integer expectedCid) {
-+    if (!sendOut(packet)) {
++    return transactIo(reportIo(), packet, expectedCmd, expectedCid);
++  }
++
++  byte[] transactIo(
++      final ReportIo io,
++      final ByteBuffer packet,
++      final byte expectedCmd,
++      final Integer expectedCid) {
++    if (!io.send(packet)) {
 +      return null;
 +    }
 +    while (true) {
-+      final ByteBuffer resp = waitForIn();
++      final ByteBuffer resp = io.recvReport();
 +      if (resp == null) {
 +        return null;
 +      }
@@ -1801,12 +1857,12 @@ index 0000000000..9503f0a81e
 +    p.put((byte) (len & 0xFF));
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..e314e4580f
+index 0000000000..34e391404a
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,1117 @@
+@@ -0,0 +1,1121 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -2207,7 +2263,7 @@ index 0000000000..e314e4580f
 +                          .getSystemService(Context.USB_SERVICE);
 +              if (usb == null || !transport.bindDevice(device, usb)) {
 +                transport.release();
-+                flow.settleError(new WebAuthnUtils.Exception("UNKNOWN_ERR"));
++                flow.settleError(new WebAuthnUtils.Exception("NETWORK_ERR"));
 +                return;
 +              }
 +              runExchange(flow, new UsbSession(transport));
@@ -2717,8 +2773,12 @@ index 0000000000..e314e4580f
 +      case 0x3A: // ACTION_TIMEOUT
 +        return new WebAuthnUtils.Exception("TIMEOUT_ERR");
 +      default:
++        // WebAuthn spec reserves NotAllowedError for user refusal/policy; a transport or host
++        // failure is a NetworkError ("the authenticator ran into trouble"). Misrouting it as
++        // NOT_ALLOWED_ERR told users "you denied permission" when OUR channel setup failed
++        // (observed 2026-11-08: probe-before-INIT bug surfaced as that mislabel).
 +        Log.w(LOGTAG, "security key failure: " + ex.getMessage());
-+        return new WebAuthnUtils.Exception("NOT_ALLOWED_ERR");
++        return new WebAuthnUtils.Exception("NETWORK_ERR");
 +    }
 +  }
 +
@@ -4012,7 +4072,7 @@ index 0000000000..13e2f5117e
 +    return options;
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/PinProtocolOneTest.java
 new file mode 100644
 index 0000000000..d307b33199
 --- /dev/null
@@ -4610,7 +4670,7 @@ index 0000000000..43526a16f3
 +                info(CLASS_HID, PROTO_KEYBOARD, false, false, 64))));
 +  }
 +}
-diff --git diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/WebAuthnCtap2KeyInfoTest.java
 new file mode 100644
 index 0000000000..f607bc92bd
 --- /dev/null
@@ -4774,6 +4834,196 @@ index 0000000000..f607bc92bd
 +    assertEquals("NO_CREDENTIALS", Ctap2Error.describe(0x2E));
 +    assertEquals("PIN_REQUIRED", Ctap2Error.describe(0x36));
 +    assertEquals("VENDOR_RANGE", Ctap2Error.describe(0xF7));
++  }
++}
+diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2LifecycleTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2LifecycleTest.java
+new file mode 100644
+index 0000000000..371813e62d
+--- /dev/null
++++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2LifecycleTest.java
+@@ -0,0 +1,184 @@
++/*
++ * Copyright (c) 2026 haasanen
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++package org.mozilla.gecko.ctap2;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.fail;
++
++import java.nio.ByteBuffer;
++import java.util.ArrayDeque;
++import java.util.ArrayList;
++import java.util.Deque;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Set;
++import org.junit.Test;
++
++/**
++ * Lifecycle contract tests driven by a SCRIPTED KEY that enforces the CTAPHID rules itself
++ * (spec 8.1.5.4 + 8.1.9.1.3): a CBOR command on a channel the key never allocated (or has aged
++ * out) is answered with CTAPHID ERROR 0x04 (invalid channel). This is the regression class that
++ * shipped as "USB channel not initialized" + a DOM NotAllowedError on 2026-11-08: a GetInfo probe
++ * rode a probe-time channel the key had already discarded. A self-round-trip through our own
++ * constants could never see it — the scripted peer here allocates its OWN CIDs and derives its own
++ * error responses.
++ */
++public class UsbCtap2LifecycleTest {
++
++  /** Minimal CTAPHID key: fresh CID on every INIT, nonce echo, ERROR 0x04 on unknown channels. */
++  private static final class FakeKey implements UsbCtap2Transport.ReportIo {
++    static final int BROADCAST = 0xFFFFFFFF;
++    static final int INIT = 0x06;
++    static final int ERROR = 0x3F;
++    static final int CBOR = 0x10;
++
++    final List<String> observed = new ArrayList<>();
++    final Set<Integer> active = new HashSet<>();
++    int nextCid = 0x11111111;
++    boolean echo = true;
++    byte[] cborBody = new byte[] {0x00, (byte) 0xA0}; // status OK + empty CBOR map
++
++    private final Deque<ByteBuffer> out = new ArrayDeque<>();
++    private ByteBuffer collected;
++    private int cid;
++    private int bcnt;
++    private byte cmd;
++
++    @Override
++    public boolean send(final ByteBuffer packet) {
++      final ByteBuffer p = packet.duplicate();
++      p.rewind();
++      final int pcid = p.getInt();
++      final int header = p.get() & 0xFF;
++      if ((header & 0x80) != 0) {
++        bcnt = ((p.get() & 0xFF) << 8) | (p.get() & 0xFF);
++        cmd = (byte) (header & 0x7F);
++        cid = pcid;
++        collected = ByteBuffer.allocate(bcnt);
++      }
++      while (collected.hasRemaining() && p.hasRemaining()) {
++        collected.put(p.get());
++      }
++      if (!collected.hasRemaining()) {
++        respond();
++      }
++      return true;
++    }
++
++    private void respond() {
++      final byte[] payload = new byte[bcnt];
++      collected.rewind();
++      collected.get(payload);
++      observed.add(Integer.toHexString(cid) + ":" + Integer.toHexString(cmd & 0xFF));
++      if (cmd == INIT) {
++        final int newCid = echo ? nextCid++ : 0x55555555;
++        if (echo) {
++          active.add(newCid);
++        }
++        final ByteBuffer r = report(BROADCAST, INIT | 0x80, 17);
++        for (int i = 0; i < 8; i++) {
++          r.put(echo ? payload[i] : (byte) (payload[i] ^ 0xFF));
++        }
++        r.putInt(newCid);
++        r.put((byte) 0x05); // CTAPHID protocol version
++        r.put(new byte[] {0x04, 0x7F, 0x23}); // device version (placeholder)
++        r.put((byte) 0x04); // capabilities: CBOR
++        out.add(finish(r));
++      } else if (cmd == CBOR && !active.contains(cid)) {
++        final ByteBuffer r = report(cid, ERROR | 0x80, 1);
++        r.put((byte) 0x04); // CHANNEL_ERR: never allocated / aged out — the shipped bug witness
++        out.add(finish(r));
++      } else if (cmd == CBOR) {
++        final ByteBuffer r = report(cid, CBOR | 0x80, cborBody.length);
++        r.put(cborBody);
++        out.add(finish(r));
++      } else {
++        final ByteBuffer r = report(cid, ERROR | 0x80, 1);
++        r.put((byte) 0x01);
++        out.add(finish(r));
++      }
++    }
++
++    @Override
++    public ByteBuffer recvReport() {
++      return out.poll();
++    }
++
++    void forget() {
++      active.clear();
++    }
++
++    private static ByteBuffer report(final int reportCid, final int cmdByte, final int total) {
++      final ByteBuffer b = ByteBuffer.allocate(64);
++      b.putInt(reportCid);
++      b.put((byte) cmdByte);
++      b.put((byte) (total >> 8));
++      b.put((byte) (total & 0xFF));
++      return b;
++    }
++
++    private static ByteBuffer finish(final ByteBuffer b) {
++      b.rewind();
++      final ByteBuffer copy = ByteBuffer.allocate(64);
++      copy.put(b);
++      copy.rewind();
++      return copy;
++    }
++  }
++
++  @Test
++  public void cborCommandOnFreshTransportAllocatesChannelFirst() throws Exception {
++    final UsbCtap2Transport transport = new UsbCtap2Transport();
++    final FakeKey key = new FakeKey();
++    // Fresh transport holds NO channel — exactly the state bindDevice probing now leaves behind.
++    final byte[] body =
++        transport.sendCtapCommandIo(key, 0x04 /* GetInfo */, new byte[] {(byte) 0xA0});
++    assertEquals(
++        "the scripted key must see INIT before any CBOR",
++        "[ffffffff:6, 11111111:10]",
++        key.observed.toString());
++    assertArrayEquals(new byte[] {(byte) 0xA0}, body);
++  }
++
++  @Test
++  public void eachInitAllocatesItsOwnFreshChannel() throws Exception {
++    final UsbCtap2Transport transport = new UsbCtap2Transport();
++    final FakeKey key = new FakeKey();
++    assertTrue(transport.initializeIo(key));
++    final int first = transport.channelForTest();
++    assertEquals(0x11111111, first);
++    assertTrue(transport.initializeIo(key));
++    assertTrue("second INIT must yield a DIFFERENT channel", transport.channelForTest() != first);
++    assertEquals(0x11111112, transport.channelForTest()); // scripted key allocates a fresh CID each INIT
++  }
++
++  @Test
++  public void cborOnChannelKeyDiscardedSurfacesNamedError() throws Exception {
++    final UsbCtap2Transport transport = new UsbCtap2Transport();
++    final FakeKey key = new FakeKey();
++    assertTrue(transport.initializeIo(key));
++    key.forget(); // the key ages the channel out — legal per spec 8.1.5.4
++    try {
++      transport.sendCtapCommandIo(key, 0x04, new byte[] {(byte) 0xA0});
++      fail("expected Ctap2Error");
++    } catch (final Ctap2Error e) {
++      assertTrue(
++          "error must be named, never mislabeled: " + e.getMessage(),
++          e.getMessage().contains("CTAPHID error 0x4"));
++    }
++  }
++
++  @Test
++  public void initNonceMismatchIsRejected() {
++    final UsbCtap2Transport transport = new UsbCtap2Transport();
++    final FakeKey key = new FakeKey();
++    key.echo = false; // stale/corrupt INIT response must not win the freshness guard
++    assertFalse(transport.initializeIo(key));
 +  }
 +}
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/util/WebAuthnUtilsTest.java
