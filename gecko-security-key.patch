@@ -4838,10 +4838,10 @@ index 0000000000..f607bc92bd
 +}
 diff --git a/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2LifecycleTest.java b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2LifecycleTest.java
 new file mode 100644
-index 0000000000..371813e62d
+index 0000000000..a19bcc44e2
 --- /dev/null
 +++ b/mobile/android/geckoview/src/test/java/org/mozilla/gecko/ctap2/UsbCtap2LifecycleTest.java
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,187 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -4863,6 +4863,8 @@ index 0000000000..371813e62d
 +import java.util.List;
 +import java.util.Set;
 +import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.robolectric.RobolectricTestRunner;
 +
 +/**
 + * Lifecycle contract tests driven by a SCRIPTED KEY that enforces the CTAPHID rules itself
@@ -4873,6 +4875,7 @@ index 0000000000..371813e62d
 + * constants could never see it — the scripted peer here allocates its OWN CIDs and derives its own
 + * error responses.
 + */
++@RunWith(RobolectricTestRunner.class)
 +public class UsbCtap2LifecycleTest {
 +
 +  /** Minimal CTAPHID key: fresh CID on every INIT, nonce echo, ERROR 0x04 on unknown channels. */
