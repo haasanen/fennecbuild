@@ -1859,10 +1859,10 @@ index 0000000000..72c6c5feb8
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..34e391404a
+index 0000000000..23992f353d
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,1121 @@
+@@ -0,0 +1,1120 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -2194,7 +2194,7 @@ index 0000000000..34e391404a
 +    startLateUsbWatch(flow);
 +  }
 +
-+  /** Main thread: an NFC tag was tapped — USB must not start a second flow. */
++  /** NFC binder thread: an IsoDep tag was tapped — USB must not start a second flow. */
 +  private static void onTag(final FlowState flow, final Tag tag) {
 +    if (flow.settled.get() || flow.transportClaimed.get()) {
 +      return;
@@ -2209,13 +2209,12 @@ index 0000000000..34e391404a
 +    if (!flow.transportClaimed.compareAndSet(false, true)) {
 +      return;
 +    }
-+    // Claim the flow before tearing the arm down: nothing else can win now.
-+    if (flow.nfcReader != null) {
-+      final Activity activity = sResumedActivity.get();
-+      if (activity != null) {
-+        flow.nfcReader.stop(activity);
-+      }
-+    }
++    // Reader mode STAYS armed for the whole CTAP2 exchange; it is torn down by
++    // cleanup() when the flow settles. Disabling it at claim time ends the NFCC's
++    // tag session right there (NfcActivityManager.disableReaderMode ->
++    // setReaderMode(token, 0)), so the worker's IsoDep.connect() then fails on the
++    // dead handle, and the still-tapped key is re-dispatched as an ordinary tag:
++    // its NDEF URI record pops the system "open URL?" chooser mid-flow.
 +    unregisterAttachReceiver(flow);
 +    MainHolder.H.removeCallbacks(flow.poll);
 +    MainHolder.H.removeCallbacks(flow.grantTimeout);
