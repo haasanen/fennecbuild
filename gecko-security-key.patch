@@ -1859,10 +1859,10 @@ index 0000000000..72c6c5feb8
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..23992f353d
+index 0000000000..42c782ba4d
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,1120 @@
+@@ -0,0 +1,1128 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -2168,6 +2168,7 @@ index 0000000000..23992f353d
 +    MainHolder.H.postDelayed(flow.watchdog, FLOW_WATCHDOG_MS);
 +
 +    final UsbDevice attached = findUsbSecurityKey();
++    Log.i(LOGTAG, "arming security key flow; attached USB key=" + (attached != null));
 +    if (attached != null) {
 +      if (hasUsbPermission(attached)) {
 +        Log.i(LOGTAG, "USB security key attached; using it directly");
@@ -2185,6 +2186,7 @@ index 0000000000..23992f353d
 +          new NfcCtap2Transport.NfcReader(tag -> onTag(flow, tag));
 +      if (reader.start(activity)) {
 +        flow.nfcReader = reader;
++        Log.i(LOGTAG, "NFC reader mode armed; waiting for a tap");
 +      } else {
 +        Log.d(LOGTAG, "NFC reader mode unavailable; watching USB only");
 +      }
@@ -2196,13 +2198,18 @@ index 0000000000..23992f353d
 +
 +  /** NFC binder thread: an IsoDep tag was tapped — USB must not start a second flow. */
 +  private static void onTag(final FlowState flow, final Tag tag) {
++    final boolean isoDep = android.nfc.tech.IsoDep.get(tag) != null;
++    Log.i(
++        LOGTAG,
++        "NFC tap received; IsoDep-capable=" + isoDep
++            + " settled=" + flow.settled.get() + " claimed=" + flow.transportClaimed.get());
 +    if (flow.settled.get() || flow.transportClaimed.get()) {
 +      return;
 +    }
 +    // Validate BEFORE claiming: a non-IsoDep tap (transit card, badge, misread) must leave
 +    // the flow armed so the user can just tap the security key again. Claiming first made
 +    // any stray tag permanently kill the attempt.
-+    if (android.nfc.tech.IsoDep.get(tag) == null) {
++    if (!isoDep) {
 +      Log.i(LOGTAG, "tapped tag is not IsoDep-capable; still waiting for a security key");
 +      return;
 +    }
@@ -2218,6 +2225,7 @@ index 0000000000..23992f353d
 +    unregisterAttachReceiver(flow);
 +    MainHolder.H.removeCallbacks(flow.poll);
 +    MainHolder.H.removeCallbacks(flow.grantTimeout);
++    Log.i(LOGTAG, "NFC tap claimed; starting contactless exchange (reader stays armed)");
 +
 +    final Thread worker =
 +        new Thread(
