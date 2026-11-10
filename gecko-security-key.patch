@@ -35,7 +35,7 @@ index 45e11ce1c8..93e4915f7d 100644
  
      if (mozconfig.substs.MOZ_ANDROID_HLS_SUPPORT) {
 diff --git a/mobile/android/geckoview/src/main/AndroidManifest.xml b/mobile/android/geckoview/src/main/AndroidManifest.xml
-index 83bfdf85e6..186a662b15 100644
+index 83bfdf8..14a7252 100644
 --- a/mobile/android/geckoview/src/main/AndroidManifest.xml
 +++ b/mobile/android/geckoview/src/main/AndroidManifest.xml
 @@ -10,6 +10,8 @@
@@ -61,6 +61,20 @@ index 83bfdf85e6..186a662b15 100644
      <uses-feature
              android:name="android.hardware.camera.autofocus"
              android:required="false"/>
+@@ -52,4 +61,13 @@
+     </queries>
+ 
+     <!-- See AndroidManifest_overlay.jinja for <service> definitions -->
++
++    <!-- Security Key (FIDO2/WebAuthn): seeds the activity lifecycle tracker at process start,
++         before any Activity resumes, so NFC reader mode can arm on the very first request. -->
++    <application>
++        <provider
++                android:name="org.mozilla.gecko.ctap2.Ctap2LifecycleProvider"
++                android:authorities="${applicationId}.ctap2-lifecycle"
++                android:exported="false"/>
++    </application>
+ </manifest>
 diff --git diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Cbor.java
 new file mode 100644
 index 0000000000..8e6c938d7e
@@ -561,6 +575,75 @@ index 0000000000..66179fd1c0
 +        }
 +        return "UNKNOWN";
 +    }
++  }
++}
+diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java
+new file mode 100644
+index 0000000000..8c22fdc745
+--- /dev/null
++++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java
+@@ -0,0 +1,63 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.gecko.ctap2;
++
++import android.content.ContentProvider;
++import android.content.ContentValues;
++import android.database.Cursor;
++import android.net.Uri;
++
++/**
++ * Seeds the CTAP2 activity tracker at process start, before any Activity exists.
++ *
++ * <p>{@code registerActivityLifecycleCallbacks} only delivers FUTURE transitions. Attaching the
++ * tracker lazily (at the first WebAuthn request) therefore leaves it blind to the browser Activity
++ * that resumed long before that request: the first request saw no resumed Activity and NFC reader
++ * mode never armed (live Pixel 10a capture 2026-11-10: arm at process start +5s, tap 1s later
++ * routed to the system NDEF chooser because the reader was never enabled). AndroidX's own
++ * lifecycle-process artifact uses this same startup-provider seeding pattern.
++ *
++ * <p>The provider answers no queries; it exists solely so its {@link #onCreate()} — which the framework runs
++ * before any Activity or Service — installs the tracker while the state is still
++ * empty.
++ */
++public final class Ctap2LifecycleProvider extends ContentProvider {
++  @Override
++  public boolean onCreate() {
++    WebAuthnCtap2.ensureActivityTracking();
++    return true;
++  }
++
++  @Override
++  public Cursor query(
++      final Uri uri,
++      final String[] projection,
++      final String selection,
++      final String[] selectionArgs,
++      final String sortOrder) {
++    return null;
++  }
++
++  @Override
++  public String getType(final Uri uri) {
++    return null;
++  }
++
++  @Override
++  public Uri insert(final Uri uri, final ContentValues values) {
++    return null;
++  }
++
++  @Override
++  public int delete(final Uri uri, final String selection, final String[] selectionArgs) {
++    return 0;
++  }
++
++  @Override
++  public int update(
++      final Uri uri, final ContentValues values, final String selection, final String[] selectionArgs) {
++    return 0;
 +  }
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2Session.java
@@ -1883,7 +1966,7 @@ index 0000000000..72c6c5feb8
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..d04b95549d
+index 0000000000..071ba4506c
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 @@ -0,0 +1,1128 @@
@@ -2819,7 +2902,7 @@ index 0000000000..d04b95549d
 +   * Tracks the resumed Activity from the application context: NFC reader mode and the
 +   * permission/attach receivers are scoped to it. Registered lazily, once, on the main thread.
 +   */
-+  private static void ensureActivityTracking() {
++  static void ensureActivityTracking() {
 +    if (sLifecycleHooked) {
 +      return;
 +    }
