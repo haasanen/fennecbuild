@@ -622,10 +622,10 @@ index 0000000000..7976be633d
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
-index 0000000000..5b027ad620
+index 0000000000..29804282c5
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
-@@ -0,0 +1,287 @@
+@@ -0,0 +1,311 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -880,6 +880,28 @@ index 0000000000..5b027ad620
 +    public boolean start(final Activity activity) {
 +      final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
 +      if (adapter == null || !adapter.isEnabled()) {
++        // Log WHY: adapter null vs disabled are different failures; plus the two
++        // environment facts that explain a null (feature missing / permission not
++        // granted at install). Pure observation — no hypothesis baked in.
++        final boolean feature =
++            activity
++                .getPackageManager()
++                .hasSystemFeature("android.hardware.nfc");
++        final int permission =
++            activity
++                .getPackageManager()
++                .checkPermission(
++                    "android.permission.NFC", activity.getPackageName());
++        Log.w(
++            TAG,
++            "reader start unavailable: adapter="
++                + (adapter == null ? "null" : "present")
++                + " enabled="
++                + (adapter != null && adapter.isEnabled())
++                + " systemFeatureNfc="
++                + feature
++                + " nfcPermissionCheck="
++                + permission);
 +        return false;
 +      }
 +      try {
@@ -891,8 +913,10 @@ index 0000000000..5b027ad620
 +                | NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
 +            null);
 +      } catch (final Exception e) {
++        Log.w(TAG, "enableReaderMode threw", e);
 +        return false;
 +      }
++      Log.i(TAG, "reader mode enabled; waiting for tap");
 +      return true;
 +    }
 +
@@ -1859,7 +1883,7 @@ index 0000000000..72c6c5feb8
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..42c782ba4d
+index 0000000000..d04b95549d
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 @@ -0,0 +1,1128 @@
@@ -2188,10 +2212,10 @@ index 0000000000..42c782ba4d
 +        flow.nfcReader = reader;
 +        Log.i(LOGTAG, "NFC reader mode armed; waiting for a tap");
 +      } else {
-+        Log.d(LOGTAG, "NFC reader mode unavailable; watching USB only");
++        Log.w(LOGTAG, "NFC reader mode unavailable; USB only being monitored");
 +      }
 +    } else {
-+      Log.d(LOGTAG, "no resumed activity; watching USB only");
++      Log.w(LOGTAG, "no resumed activity; watching USB only");
 +    }
 +    startLateUsbWatch(flow);
 +  }
