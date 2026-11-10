@@ -705,10 +705,10 @@ index 0000000000..7976be633d
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
-index 0000000000..29804282c5
+index 0000000000..ce3335082e
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,401 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -746,6 +746,10 @@ index 0000000000..29804282c5
 +  private static final int TIMEOUT_MS = 5000;
 +  private static final int CONNECT_RETRIES = 3;
 +  private static final int MAX_SHORT_DATA = 255;
++  // CTAP 2.1 §11.3.6 short-APDU chaining: normative example uses 0xF0-sized
++  // blocks; any short block <= 255 is conformant, 0xF0 is the spec's own size.
++  private static final int CHAINED_CHUNK = 0xF0;
++  private static final byte INS_MSG = 0x10; // NFCCTAP_MSG, CTAP 2.1 §11.3.7.1
 +  private static final byte INS_GETRESPONSE = (byte) 0xC0;
 +
 +  // FIDO2 AID: RID A0 00 00 06 47, PIX 2F 00 01.
@@ -828,20 +832,22 @@ index 0000000000..29804282c5
 +    final byte[] data = new byte[cborPayload.length + 1];
 +    data[0] = (byte) ctapCmd;
 +    System.arraycopy(cborPayload, 0, data, 1, cborPayload.length);
-+    if (data.length > MAX_SHORT_DATA) {
-+      throw new Ctap2Error(
-+          "CTAP request too large for short APDU: " + data.length);
++    final byte[] raw;
++    if (data.length <= MAX_SHORT_DATA) {
++      // Single short (case-4) APDU: 80 10 00 00 Lc <cmd || CBOR> Le=00
++      // (CTAP 2.1 §11.3.5.1).
++      final byte[] apdu = new byte[5 + data.length + 1];
++      apdu[0] = (byte) 0x80;
++      apdu[1] = INS_MSG;
++      apdu[2] = 0x00;
++      apdu[3] = 0x00;
++      apdu[4] = (byte) data.length;
++      System.arraycopy(data, 0, apdu, 5, data.length);
++      apdu[5 + data.length] = 0x00;
++      raw = unwrapResponse(transceive(dep, apdu), dep);
++    } else {
++      raw = sendLargeCtapRequest(dep, data);
 +    }
-+    // Single short (case-4) APDU: 80 10 00 00 Lc <cmd || CBOR> Le=00.
-+    final byte[] apdu = new byte[5 + data.length + 1];
-+    apdu[0] = (byte) 0x80;
-+    apdu[1] = 0x10;
-+    apdu[2] = 0x00;
-+    apdu[3] = 0x00;
-+    apdu[4] = (byte) data.length;
-+    System.arraycopy(data, 0, apdu, 5, data.length);
-+    apdu[5 + data.length] = 0x00;
-+    final byte[] raw = unwrapResponse(transceive(dep, apdu), dep);
 +    if (raw.length == 0) {
 +      throw new Ctap2Error("empty NFC response");
 +    }
@@ -860,6 +866,90 @@ index 0000000000..29804282c5
 +          null);
 +    }
 +    return body;
++  }
++
++  /**
++   * Sends a CTAP request that does not fit a short APDU (a real
++   * makeCredential request measured 396 bytes data-field, device log
++   * 2026-11-10).
++   *
++   * <p>Primary encoding is ISO 7816-4 extended length: CTAP 2.1 §11.3.5
++   * conformance states authenticators MUST support short and extended length
++   * encoding, and Android's IsoDep.transceive fragments payloads beyond the
++   * RF FSD/FSC limits itself (framework IsoDep javadoc: "Applications do not
++   * need to fragment the payload, it will be automatically fragmented and
++   * defragmented by transceive"), so a single extended C-APDU travels as
++   * ISO-DEP chained I-blocks without help from us.
++   *
++   * <p>If this adapter lacks extended-length APDU support
++   * (IsoDep.isExtendedLengthApduSupported) or the authenticator rejects the
++   * extended encoding (SW 6700/6A81/6D00/6E00), fall back to the normative
++   * CTAP 2.1 §11.3.6 short APDU chaining: continuation blocks CLA=0x90
++   * INS=0x10 without Le (each intermediate block must answer 9000) and a
++   * final CLA=0x80 block with Le=00, matching the spec's two-block
++   * makeCredential sample byte for byte; chunk size 0xF0 is the spec's own
++   * sample size. Each block stays within IsoDep frame limits unassisted.
++   */
++  private byte[] sendLargeCtapRequest(final IsoDep dep, final byte[] data) {
++    if (dep.isExtendedLengthApduSupported()) {
++      // 80 10 00 00 00 Lc16 <cmd || CBOR> Le=0000 (extended form).
++      final byte[] apdu = new byte[7 + data.length + 2];
++      apdu[0] = (byte) 0x80;
++      apdu[1] = INS_MSG;
++      apdu[2] = 0x00;
++      apdu[3] = 0x00;
++      apdu[4] = 0x00; // zero short Lc introduces the 16-bit extended Lc
++      apdu[5] = (byte) (data.length >>> 8);
++      apdu[6] = (byte) data.length;
++      System.arraycopy(data, 0, apdu, 7, data.length);
++      apdu[7 + data.length] = 0x00;
++      apdu[8 + data.length] = 0x00;
++      final byte[] first = transceive(dep, apdu);
++      final int sw = statusWord(first);
++      if (sw != 0x6700 && sw != 0x6A81 && sw != 0x6D00 && sw != 0x6E00) {
++        return unwrapResponse(first, dep);
++      }
++      Log.i(
++          TAG,
++          "extended APDU refused (SW 0x"
++              + Integer.toHexString(sw).toUpperCase()
++              + "); falling back to short chaining");
++    }
++    byte[] last = null;
++    int off = 0;
++    while (off < data.length) {
++      final int n = Math.min(CHAINED_CHUNK, data.length - off);
++      final boolean finalBlock = off + n >= data.length;
++      final byte[] apdu = new byte[finalBlock ? 6 + n : 5 + n];
++      apdu[0] = finalBlock ? (byte) 0x80 : (byte) 0x90;
++      apdu[1] = INS_MSG;
++      apdu[2] = 0x00;
++      apdu[3] = 0x00;
++      apdu[4] = (byte) n;
++      System.arraycopy(data, off, apdu, 5, n);
++      if (finalBlock) {
++        apdu[5 + n] = 0x00;
++      }
++      last = transceive(dep, apdu);
++      if (!finalBlock) {
++        final int sw = statusWord(last);
++        if (sw != 0x9000) {
++          throw new Ctap2Error(
++              "NFC chain block at "
++                  + off
++                  + " rejected, SW 0x"
++                  + Integer.toHexString(sw).toUpperCase());
++        }
++      }
++      off += n;
++    }
++    if (data.length % CHAINED_CHUNK == 0) {
++      // Whole blocks still need an empty final block to end the message.
++      last =
++          transceive(
++              dep, new byte[] {(byte) 0x80, INS_MSG, 0x00, 0x00, 0x00, 0x00});
++    }
++    return unwrapResponse(last, dep);
 +  }
 +
 +  /**
