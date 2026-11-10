@@ -207,7 +207,7 @@ jobs:
           # (one-commit bump per push), so N = versionCode % 1000 gives
           # h1, h2, ... h999 within a Firefox major — deterministic, no API
           # call, and it resets with a rebase exactly like the versionCode.
-          # CONSTRAINT (found by run 42865786682 dying on 1580120): DIGIT 6
+          # CONSTRAINT (found by run 42865786682 dying on 1580030): DIGIT 6
           # of the code is the ABI target in prebuild.sh (0=armv7 1=x86_64
           # 2=arm64; anything else = "Unknown target code"), so our arm64
           # codes must keep digit 6 = 2 and live in the bands x20-x29,
