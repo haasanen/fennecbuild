@@ -579,10 +579,10 @@ index 0000000000..66179fd1c0
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java
 new file mode 100644
-index 0000000000..8c22fdc745
+index 0000000000..c944e033d4
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,72 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
@@ -611,7 +611,16 @@ index 0000000000..8c22fdc745
 +public final class Ctap2LifecycleProvider extends ContentProvider {
 +  @Override
 +  public boolean onCreate() {
-+    WebAuthnCtap2.ensureActivityTracking();
++    // ContentProvider.attachInfo guarantees this context's application (ActivityThread passes the
++    // real Application); GeckoAppShell.getApplicationContext() is NOT usable this early — it is
++    // only set later by GeckoRuntime initialization, which made the no-arg ensureActivityTracking
++    // a silent no-op here and left h120 blind until the next pause/resume (see WebAuthnCtap2).
++    final android.app.Application app =
++        getContext() != null ? (android.app.Application) getContext().getApplicationContext() : null;
++    WebAuthnCtap2.ensureActivityTracking(app);
++    android.util.Log.i(
++        "GeckoCtap2",
++        "ctap2 lifecycle provider installed; hook=" + WebAuthnCtap2.trackingInstalled());
 +    return true;
 +  }
 +
@@ -2056,10 +2065,10 @@ index 0000000000..72c6c5feb8
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..071ba4506c
+index 0000000000..c9a04c26d6
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
-@@ -0,0 +1,1128 @@
+@@ -0,0 +1,1207 @@
 +/*
 + * Copyright (c) 2026 haasanen
 + * SPDX-License-Identifier: GPL-3.0-or-later
@@ -2152,6 +2161,7 @@ index 0000000000..071ba4506c
 +
 +  private static final Object LOCK = new Object();
 +  private static boolean sInFlight = false;
++  private static long sInFlightSince = 0L;
 +
 +  private static WeakReference<Activity> sResumedActivity = new WeakReference<>(null);
 +  private static boolean sLifecycleHooked = false;
@@ -2338,9 +2348,17 @@ index 0000000000..071ba4506c
 +  private static <T> GeckoResult<T> start(final Request request) {
 +    synchronized (LOCK) {
 +      if (sInFlight) {
++        // Breadcrumb: h120 showed this guard is reached constantly after a stuck flow, and it
++        // logged nothing (screenshot error "not, or is no longer, usable" with no app-side trace).
++        Log.w(
++            LOGTAG,
++            "webauthn request rejected; previous flow still in flight for "
++                + (android.os.SystemClock.elapsedRealtime() - sInFlightSince)
++                + " ms");
 +        return GeckoResult.fromException(new WebAuthnUtils.Exception("INVALID_STATE_ERR"));
 +      }
 +      sInFlight = true;
++      sInFlightSince = android.os.SystemClock.elapsedRealtime();
 +    }
 +    final FlowState flow = new FlowState(request);
 +    MainHolder.H.post(
@@ -2993,10 +3011,27 @@ index 0000000000..071ba4506c
 +   * permission/attach receivers are scoped to it. Registered lazily, once, on the main thread.
 +   */
 +  static void ensureActivityTracking() {
++    ensureActivityTracking(GeckoAppShell.getApplicationContext());
++  }
++
++  /** Whether the lifecycle hook is installed (provider breadcrumb reporting). */
++  static boolean trackingInstalled() {
++    return sLifecycleHooked;
++  }
++
++  /**
++   * Installs the tracker on the given Application context. The startup provider passes its OWN
++   * context (guaranteed by ContentProvider.attachInfo); the lazy arm() path falls back to
++   * GeckoAppShell.getApplicationContext(). That fallback was the h120 bug: the static is set by
++   * GeckoRuntime initialization, which runs long AFTER installContentProviders, so at provider
++   * time it was null and registration silently never happened (Pixel 10a capture 2026-11-10
++   * 23:55: Activity resumed 23:54:43/23:55:03 per wm_on_resume_called, arm at 23:55:06 saw a null
++   * sResumedActivity, zero setReaderMode all session).
++   */
++  static void ensureActivityTracking(final Context ctx) {
 +    if (sLifecycleHooked) {
 +      return;
 +    }
-+    final Context ctx = GeckoAppShell.getApplicationContext();
 +    if (!(ctx instanceof Application)) {
 +      return;
 +    }
@@ -3034,6 +3069,59 @@ index 0000000000..071ba4506c
 +              public void onActivityDestroyed(final Activity activity) {}
 +            });
 +    sLifecycleHooked = true;
++    // registerActivityLifecycleCallbacks delivers FUTURE transitions only; seed the current
++    // state so registration timing never matters (the provider path registers before the first
++    // resume anyway; this covers the lazy arm() path, which otherwise stayed blind until the
++    // next pause/resume cycle — h120 symptom).
++    backfillResumedActivity();
++  }
++
++  /**
++   * Seeds sResumedActivity from the live activity table if one is currently resumed. Uses the
++   * @unsupported-but-accessible ActivityThread.getActivities() (warning-only on current
++   * targetSdk; wrapped so a locked-down future release just degrades to event-driven seeding).
++   */
++  private static void backfillResumedActivity() {
++    try {
++      final Class<?> activityThread = Class.forName("android.app.ActivityThread");
++      final Object at = activityThread.getMethod("currentActivityThread").invoke(null);
++      final Object records = activityThread.getMethod("getActivities").invoke(at);
++      Activity fallback = null;
++      for (final Object record : ((java.util.Map<?, ?>) records).values()) {
++        final Activity candidate = (Activity) record.getClass().getField("activity").get(record);
++        if (candidate == null || candidate.isFinishing()) {
++          continue;
++        }
++        // Activity#isResumed() is @hide in the framework (only androidx subclasses expose it), so
++        // probe it reflectively; getActivities() guarantees at-least-STARTED for every record, and
++        // our flow only ever runs while the app is foregrounded, so a non-resumed candidate is a
++        // last-resort seed only (a paused host arms reader mode no better than the old code did).
++        final Boolean resumed = tryIsResumed(candidate);
++        if (Boolean.TRUE.equals(resumed)) {
++          sResumedActivity = new WeakReference<>(candidate);
++          Log.i(LOGTAG, "backfilled resumed activity: " + candidate.getClass().getName());
++          return;
++        }
++        if (resumed == null && fallback == null) {
++          fallback = candidate;
++        }
++      }
++      if (fallback != null) {
++        sResumedActivity = new WeakReference<>(fallback);
++        Log.i(LOGTAG, "backfilled started activity (isResumed unavailable): "
++            + fallback.getClass().getName());
++      }
++    } catch (final ReflectiveOperationException | RuntimeException e) {
++      Log.i(LOGTAG, "resumed-activity backfill unavailable: " + e);
++    }
++  }
++
++  private static Boolean tryIsResumed(final Activity activity) {
++    try {
++      return (Boolean) Activity.class.getMethod("isResumed").invoke(activity);
++    } catch (final ReflectiveOperationException | RuntimeException e) {
++      return null;
++    }
 +  }
 +
 +  // ---------------------------------------------------------------- capabilities
