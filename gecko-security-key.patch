@@ -579,10 +579,10 @@ index 0000000000..66179fd1c0
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java
 new file mode 100644
-index 0000000000..c944e033d4
+index 0000000000..de6a8182fc
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/Ctap2LifecycleProvider.java
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,75 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
@@ -618,9 +618,12 @@ index 0000000000..c944e033d4
 +    final android.app.Application app =
 +        getContext() != null ? (android.app.Application) getContext().getApplicationContext() : null;
 +    WebAuthnCtap2.ensureActivityTracking(app);
-+    android.util.Log.i(
-+        "GeckoCtap2",
-+        "ctap2 lifecycle provider installed; hook=" + WebAuthnCtap2.trackingInstalled());
++    if (!WebAuthnCtap2.trackingInstalled()) {
++      // Only the degraded outcome is a field-visible signal now (2026-11-11 log cleanup): a
++      // silent provider that never hooked is exactly the h120 failure and must never be mute.
++      android.util.Log.w(
++          "GeckoCtap2", "ctap2 lifecycle provider could NOT install activity hook");
++    }
 +    return true;
 +  }
 +
@@ -714,7 +717,7 @@ index 0000000000..7976be633d
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 new file mode 100644
-index 0000000000..ce3335082e
+index 0000000000..9dde08d4a8
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/NfcCtap2Transport.java
 @@ -0,0 +1,401 @@
@@ -1098,7 +1101,7 @@ index 0000000000..ce3335082e
 +        Log.w(TAG, "enableReaderMode threw", e);
 +        return false;
 +      }
-+      Log.i(TAG, "reader mode enabled; waiting for tap");
++      Log.d(TAG, "reader mode enabled; waiting for tap");
 +      return true;
 +    }
 +
@@ -2065,7 +2068,7 @@ index 0000000000..72c6c5feb8
 +}
 diff --git a/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 new file mode 100644
-index 0000000000..c9a04c26d6
+index 0000000000..67cfa00f7d
 --- /dev/null
 +++ b/mobile/android/geckoview/src/main/java/org/mozilla/gecko/ctap2/WebAuthnCtap2.java
 @@ -0,0 +1,1207 @@
@@ -2383,10 +2386,10 @@ index 0000000000..c9a04c26d6
 +    MainHolder.H.postDelayed(flow.watchdog, FLOW_WATCHDOG_MS);
 +
 +    final UsbDevice attached = findUsbSecurityKey();
-+    Log.i(LOGTAG, "arming security key flow; attached USB key=" + (attached != null));
++    Log.d(LOGTAG, "arming security key flow; attached USB key=" + (attached != null));
 +    if (attached != null) {
 +      if (hasUsbPermission(attached)) {
-+        Log.i(LOGTAG, "USB security key attached; using it directly");
++        Log.d(LOGTAG, "USB security key attached; using it directly");
 +        startUsbFlow(flow, attached);
 +      } else {
 +        requestUsbPermission(flow, attached);
@@ -2401,7 +2404,7 @@ index 0000000000..c9a04c26d6
 +          new NfcCtap2Transport.NfcReader(tag -> onTag(flow, tag));
 +      if (reader.start(activity)) {
 +        flow.nfcReader = reader;
-+        Log.i(LOGTAG, "NFC reader mode armed; waiting for a tap");
++        Log.d(LOGTAG, "NFC reader mode armed; waiting for a tap");
 +      } else {
 +        Log.w(LOGTAG, "NFC reader mode unavailable; USB only being monitored");
 +      }
@@ -2414,7 +2417,7 @@ index 0000000000..c9a04c26d6
 +  /** NFC binder thread: an IsoDep tag was tapped — USB must not start a second flow. */
 +  private static void onTag(final FlowState flow, final Tag tag) {
 +    final boolean isoDep = android.nfc.tech.IsoDep.get(tag) != null;
-+    Log.i(
++    Log.d(
 +        LOGTAG,
 +        "NFC tap received; IsoDep-capable=" + isoDep
 +            + " settled=" + flow.settled.get() + " claimed=" + flow.transportClaimed.get());
@@ -2425,7 +2428,7 @@ index 0000000000..c9a04c26d6
 +    // the flow armed so the user can just tap the security key again. Claiming first made
 +    // any stray tag permanently kill the attempt.
 +    if (!isoDep) {
-+      Log.i(LOGTAG, "tapped tag is not IsoDep-capable; still waiting for a security key");
++      Log.d(LOGTAG, "tapped tag is not IsoDep-capable; still waiting for a security key");
 +      return;
 +    }
 +    if (!flow.transportClaimed.compareAndSet(false, true)) {
@@ -2440,7 +2443,7 @@ index 0000000000..c9a04c26d6
 +    unregisterAttachReceiver(flow);
 +    MainHolder.H.removeCallbacks(flow.poll);
 +    MainHolder.H.removeCallbacks(flow.grantTimeout);
-+    Log.i(LOGTAG, "NFC tap claimed; starting contactless exchange (reader stays armed)");
++    Log.d(LOGTAG, "NFC tap claimed; starting contactless exchange (reader stays armed)");
 +
 +    final Thread worker =
 +        new Thread(
@@ -2524,7 +2527,7 @@ index 0000000000..c9a04c26d6
 +              owner = sPermissionOwner == flow;
 +            }
 +            if (!owner) {
-+              Log.i(LOGTAG, "USB permission broadcast for another flow; ignoring");
++              Log.d(LOGTAG, "USB permission broadcast for another flow; ignoring");
 +              return;
 +            }
 +            final UsbDevice fresh = findUsbSecurityKey();
@@ -2538,7 +2541,7 @@ index 0000000000..c9a04c26d6
 +              flow.settleError(new WebAuthnUtils.Exception("NOT_ALLOWED_ERR"));
 +              return;
 +            }
-+            Log.i(LOGTAG, "USB access granted; starting USB flow");
++            Log.d(LOGTAG, "USB access granted; starting USB flow");
 +            startUsbFlow(flow, fresh != null ? fresh : device);
 +          }
 +        };
@@ -2702,7 +2705,7 @@ index 0000000000..c9a04c26d6
 +        throw new Ctap2Error("could not reach the FIDO2 authenticator on the security key");
 +      }
 +      final KeyInfo info = fetchKeyInfo(session);
-+      Log.i(
++      Log.d(
 +          LOGTAG,
 +          "security key capabilities: versions="
 +              + info.versions
@@ -3099,7 +3102,7 @@ index 0000000000..c9a04c26d6
 +        final Boolean resumed = tryIsResumed(candidate);
 +        if (Boolean.TRUE.equals(resumed)) {
 +          sResumedActivity = new WeakReference<>(candidate);
-+          Log.i(LOGTAG, "backfilled resumed activity: " + candidate.getClass().getName());
++          Log.d(LOGTAG, "backfilled resumed activity: " + candidate.getClass().getName());
 +          return;
 +        }
 +        if (resumed == null && fallback == null) {
@@ -3108,11 +3111,11 @@ index 0000000000..c9a04c26d6
 +      }
 +      if (fallback != null) {
 +        sResumedActivity = new WeakReference<>(fallback);
-+        Log.i(LOGTAG, "backfilled started activity (isResumed unavailable): "
++        Log.d(LOGTAG, "backfilled started activity (isResumed unavailable): "
 +            + fallback.getClass().getName());
 +      }
 +    } catch (final ReflectiveOperationException | RuntimeException e) {
-+      Log.i(LOGTAG, "resumed-activity backfill unavailable: " + e);
++      Log.w(LOGTAG, "resumed-activity backfill unavailable: " + e);
 +    }
 +  }
 +
