@@ -182,14 +182,19 @@ find "$patches/a-c-overlay" -type f | while read -r src; do
     cp "$src" "${src#"$patches/a-c-overlay/"}"
 done
 # Add the added search engines as `general` engines
+# (160 form: the 'GENERAL_SEARCH_ENGINE_IDS =' header and its 'setOf('
+# opener are now on separate lines, so the old 'setOf' one-line address
+# silently matched nothing; match the header, step to setOf(, append).
 sed -i \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "brave",' \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "ddghtml",' \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "ddglite",' \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "metager",' \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "mojeek",' \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "qwantlite",' \
-    -e '/GENERAL_SEARCH_ENGINE_IDS = setOf/a\    "startpage",' \
+    -e '/GENERAL_SEARCH_ENGINE_IDS =/,/    setOf(/ {/    setOf(/a\
+    "brave",\
+    "ddghtml",\
+    "ddglite",\
+    "metager",\
+    "mojeek",\
+    "qwantlite",\
+    "startpage",
+}' \
     components/feature/search/src/main/java/mozilla/components/feature/search/storage/SearchEngineReader.kt
 popd
 
@@ -293,20 +298,25 @@ apply_patch "$patches/fenix-unifiedpush.patch"
 # Patch the use of proprietary and tracking libraries
 apply_patch "$patches/a-c-liberate.patch"
 apply_patch "$patches/fenix-liberate.patch"
-# Full GMS/microG removal: the CTAP2 port above replaced the FIDO service
-# binding, so drop the last org.microg consumers (Adjust ads-id, the
-# integrity stub's play-services-tasks), the inert GMS oss-licenses plugin,
-# and take the integrity module out of the AC build graph (nothing in this
-# build references it — a-c-liberate removed the code seam, fenix-liberate
-# the app-level dependency).
+# Full GMS/microG removal of ARTIFACTS: the CTAP2 port above replaced the
+# FIDO service binding, and Adjust ads-id stays out (dummy in-tree adjust).
+# The integrity module now COMPILES (160 fenix references it): it runs
+# against the in-tree play.core.integrity stubs that a-c-liberate@160 adds
+# and the microG play-services-tasks jar (no GMS runtime; tokens fail
+# gracefully on devices without Play, IPP then uses the 'fxa' auth source).
+# gms-free.patch therefore only retargets the microg pin to the newest
+# mavenCentral release and drops the ads-id consumers + the review-test
+# helper (FakeReviewManager) — no module-graph surgery.
 apply_patch "$patches/gms-free.patch"
 
-# Disable search engines configuration fetching from a Mozilla server
+# Expose the search-engine config toggle in SecretSettings (fork feature)
 apply_patch "$patches/fenix-disable-remote-search-configuration.patch"
-sed -i 's|https://firefox.settings.services.allizom.org/v1/buckets/main/collections/search-config/records||g' toolkit/components/search/SearchUtils.sys.mjs
-sed -i 's|https://firefox.settings.services.allizom.org/v1/buckets/main-preview/collections/search-config/records||g' toolkit/components/search/SearchUtils.sys.mjs
-sed -i 's|https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/search-config/records||g' toolkit/components/search/SearchUtils.sys.mjs
-sed -i 's|https://firefox.settings.services.mozilla.com/v1/buckets/main-preview/collections/search-config/records||g' toolkit/components/search/SearchUtils.sys.mjs
+# Disable search engines configuration fetching from a Mozilla server.
+# 159+ moved this from a URL literal in SearchUtils.sys.mjs (our old sed,
+# now dead) to RemoteSettings collections 'search-config-v2/v3' fetched from
+# the default server. Point SETTINGS_KEY at a collection that does not exist
+# server-side: the selector then merges only the app-bundled engine configs.
+sed -i -e 's|return lazy.configV3FeatureGate ? "search-config-v3" : "search-config-v2";|return "search-config-fork-local";|' toolkit/components/search/SearchUtils.sys.mjs
 
 # Remove the use of RemoteSettingsCrashPull, the part of the crash reporter
 apply_patch "$patches/fenix-disable-crashpull.patch"

@@ -67,7 +67,7 @@ run_stage() {
 # the same thing when nothing changed.
 M2="$HOME/.m2/repository"
 
-glean_published() {  # $1 = version dir (70.2.0 for glean, 70.0.0 for glean_as)
+glean_published() {  # $1 = version dir (70.3.0 for glean, 70.0.0 for glean_as)
     local V="$1"
     [ -f "$M2/org/mozilla/telemetry/glean/$V/glean-$V.aar" ] || return 1
     [ -f "$M2/org/mozilla/telemetry/glean-native/$V/glean-native-$V.aar" ] || return 1
@@ -91,9 +91,21 @@ bash "$(dirname "$0")/publish-cbor-mavenlocal.sh"
 fi
 fi
 
+# Stage microG play-services-tasks/basement (mavenCentral 0.3.14.250932).
+# Needed since the 160 liberate chain: the AC lib/integrity-googleplay module
+# and fenix compile against org.microg.gms play-services-tasks (toml
+# version.ref microg, retargeted by gms-free.patch).
+if run_stage microg; then
+if [ -f "$M2/org/microg/gms/play-services-tasks/0.3.14.250932/play-services-tasks-0.3.14.250932.pom" ] && [ -f "$M2/org/microg/gms/play-services-basement/0.3.14.250932/play-services-basement-0.3.14.250932.pom" ]; then
+    echo "microg: artefacts already in ~/.m2 — skipping stage"
+else
+bash "$(dirname "$0")/publish-microg-mavenlocal.sh"
+fi
+fi
+
 if run_stage glean; then
-if glean_published 70.2.0; then
-    echo "glean: all artefacts already in ~/.m2 (70.2.0) — skipping build"
+if glean_published 70.3.0; then
+    echo "glean: all artefacts already in ~/.m2 (70.3.0) — skipping build"
 else
 pushd "$glean"
 export TARGET_CFLAGS=-DNDEBUG

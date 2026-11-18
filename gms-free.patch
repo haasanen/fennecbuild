@@ -1,127 +1,24 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 3cb5cc1a44..2f35be76e2 100644
+index 3d27859..483e6c0 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
-@@ -110,7 +110,6 @@ jna = "5.19.1"
+@@ -113,7 +113,7 @@ jna = "5.19.1"
  json = "20260814"
  jsoup = "1.23.2"
  lottie = "6.7.1"
--microg = "0.3.16.252432"
+-microg = "0.3.17.252432"
++microg = "0.3.14.250932"  # fork: newest org.microg.gms published on mavenCentral (CI stages it); API identical for play-services-tasks
  okhttp = "5.5.0"
  okio = "3.18.2"
- sentry = "8.55.0"
-@@ -235,8 +234,6 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
+ sentry = "8.58.0"
+@@ -241,7 +241,6 @@ ksp-symbol-processing-api = { module = "com.google.devtools.ksp:symbol-processin
  ksp-symbol-processing-common-deps = { module = "com.google.devtools.ksp:symbol-processing-common-deps", version.ref = "ksp" }
  mlkit-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkit-prompt" }
  osslicenses-plugin = { module = "com.google.android.gms:oss-licenses-plugin", version.ref = "osslicenses-plugin" }
 -play-services-ads-id = { module = "org.microg.gms:play-services-ads-identifier", version.ref = "microg" }
--play-services-tasks = { module = "org.microg.gms:play-services-tasks", version.ref = "microg" }
+ play-services-tasks = { module = "org.microg.gms:play-services-tasks", version.ref = "microg" }
  protobuf-compiler = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
  protobuf-javalite = { module = "com.google.protobuf:protobuf-javalite", version.ref = "protobuf" }
- 
-diff --git a/mobile/android/android-components/.buildconfig.yml b/mobile/android/android-components/.buildconfig.yml
-index 8012188758..6a13091dfc 100644
---- a/mobile/android/android-components/.buildconfig.yml
-+++ b/mobile/android/android-components/.buildconfig.yml
-@@ -1166,7 +1166,6 @@ projects:
-     - components:feature-session
-     - components:feature-tabs
-     - components:lib-dataprotect
--    - components:lib-integrity-googleplay
-     - components:lib-publicsuffixlist
-     - components:lib-state
-     - components:service-firefox-accounts
-@@ -2092,18 +2091,6 @@ projects:
-     - components:support-test
-     - components:tooling-fetch-tests
-     - components:tooling-lint
--  components:lib-integrity-googleplay:
--    description: A library for verifying the integrity of an installation using Google
--      Play
--    path: components/lib/integrity-googleplay
--    publish: true
--    upstream_dependencies:
--    - components:concept-base
--    - components:concept-fetch
--    - components:concept-integrity
--    - components:support-base
--    - components:support-test
--    - components:tooling-lint
-   components:lib-jexl:
-     description: 'Javascript Expression Language: Powerful context-based expression
-       parser and evaluator.'
-diff --git a/mobile/android/android-components/components/feature/ipprotection/build.gradle b/mobile/android/android-components/components/feature/ipprotection/build.gradle
-index a035a426b9..fda23843c7 100644
---- a/mobile/android/android-components/components/feature/ipprotection/build.gradle
-+++ b/mobile/android/android-components/components/feature/ipprotection/build.gradle
-@@ -24,7 +24,6 @@ dependencies {
-     implementation project(':components:concept-integrity')
-     implementation project(':components:concept-sync')
-     implementation project(':components:feature-tabs')
--    implementation project(':components:lib-integrity-googleplay')
-     implementation project(':components:lib-state')
-     implementation project(':components:service-firefox-accounts')
-     implementation project(':components:support-base')
-diff --git a/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/auth/gpi/IPProtectionGpiProvider.kt b/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/auth/gpi/IPProtectionGpiProvider.kt
-deleted file mode 100644
-index bbc45bd152..0000000000
---- a/mobile/android/android-components/components/feature/ipprotection/src/main/java/mozilla/components/feature/ipprotection/auth/gpi/IPProtectionGpiProvider.kt
-+++ /dev/null
-@@ -1,54 +0,0 @@
--/* This Source Code Form is subject to the terms of the Mozilla Public
-- * License, v. 2.0. If a copy of the MPL was not distributed with this
-- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
--
--@file:OptIn(ExperimentalAndroidComponentsApi::class)
--
--package mozilla.components.feature.ipprotection.auth.gpi
--
--import kotlinx.coroutines.CoroutineScope
--import kotlinx.coroutines.launch
--import mozilla.components.ExperimentalAndroidComponentsApi
--import mozilla.components.concept.engine.ipprotection.IPProtectionHandler
--import mozilla.components.feature.ipprotection.auth.IPProtectionAuthProvider
--import mozilla.components.lib.integrity.googleplay.GooglePlayIntegrityClient
--import mozilla.components.lib.integrity.googleplay.IntegrityConsumer
--import mozilla.components.support.base.log.logger.Logger
--
--/**
-- * [IPProtectionAuthProvider] that wires Google Play Integrity (GPI) warm-up and token retrieval into the IP protection
-- * handler.
-- *
-- * N.B: This is intentionally kept separate from [mozilla.components.feature.ipprotection.IPProtectionFeature] so GPI
-- * support can be composed in without affecting the default behavior.
-- *
-- * @param integrityClient the [GooglePlayIntegrityClient] to supply GPI tokens to the proxy service.
-- */
--class IPProtectionGpiProvider(private val integrityClient: GooglePlayIntegrityClient) : IPProtectionAuthProvider {
--    private val logger = Logger("IPP:Gpi")
--
--    override fun configure(handler: IPProtectionHandler, scope: CoroutineScope) {
--        val ipProtectionIntegrityClient = integrityClient.forConsumer(IntegrityConsumer.IpProtection)
--        handler.setGpiProvider(
--            object : IPProtectionHandler.GpiProvider {
--                override fun warmUp(onComplete: (Boolean) -> Unit) {
--                    scope.launch {
--                        onComplete(integrityClient.warmUp())
--                    }
--                }
--
--                override fun getToken(onComplete: (String?) -> Unit) {
--                    scope.launch {
--                        val token =
--                            ipProtectionIntegrityClient
--                                .request()
--                                .onFailure { logger.error("GPI token request failed", it) }
--                                .getOrNull()
--                                ?.value
--                        onComplete(token)
--                    }
--                }
--            }
--        )
--    }
--}
 diff --git a/mobile/android/android-components/components/feature/ipprotection/src/test/java/mozilla/components/feature/ipprotection/IPProtectionGpiProviderTest.kt b/mobile/android/android-components/components/feature/ipprotection/src/test/java/mozilla/components/feature/ipprotection/IPProtectionGpiProviderTest.kt
 deleted file mode 100644
 index dec6a62a9c..0000000000
@@ -224,29 +121,17 @@ index dec6a62a9c..0000000000
 -    }
 -}
 diff --git a/mobile/android/fenix/app/build.gradle b/mobile/android/fenix/app/build.gradle
-index 0d27b7c697..cd5152be89 100644
+index d709cd5..3afc511 100644
 --- a/mobile/android/fenix/app/build.gradle
 +++ b/mobile/android/fenix/app/build.gradle
-@@ -602,7 +602,6 @@ dependencies {
+@@ -633,7 +633,6 @@ dependencies {
      implementation libs.kotlinx.coroutines
      implementation libs.kotlinx.serialization.json
      implementation libs.mozilla.glean
 -    implementation libs.play.services.ads.id
+     implementation libs.play.services.tasks
      implementation libs.protobuf.javalite
      implementation libs.sentry
-     implementation libs.androidx.documentfile
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-index 3f246142ee..98d8ddec3e 100644
---- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-@@ -10,7 +10,6 @@ import mozilla.components.browser.state.store.BrowserStore
- import mozilla.components.concept.engine.Engine
- import mozilla.components.feature.ipprotection.IPProtectionFeature
- import mozilla.components.feature.ipprotection.IPProtectionStorageSynchronizer
--import mozilla.components.feature.ipprotection.auth.gpi.IPProtectionGpiProvider
- import mozilla.components.feature.ipprotection.store.DefaultIPProtectionLocationRepository
- import mozilla.components.feature.ipprotection.store.IPProtectionLocationMiddleware
- import mozilla.components.feature.ipprotection.store.IPProtectionStore
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
 index f4c2df1f76..55cb2b4a11 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/metrics/ActivationPing.kt
@@ -304,262 +189,6 @@ index e3aa556a68..b478e42067 100644
          } catch (e: IllegalStateException) {
              // This is unlikely to happen, as this should be running off the main thread.
              Logger.debug("getAdvertisingID() - AdvertisingIdClient must be called off the main thread")
-diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-index 7b440fb3c9..43a8b9c2c0 100644
---- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-+++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/PlayStoreReviewPromptControllerTest.kt
-@@ -5,31 +5,15 @@
- package org.mozilla.fenix.components
- 
- import android.app.Activity
--import android.content.Context
- import androidx.activity.ComponentActivity
- import androidx.lifecycle.Lifecycle
- import androidx.lifecycle.lifecycleScope
- import androidx.test.core.app.launchActivity
--import com.google.android.gms.tasks.OnCompleteListener
--import com.google.android.gms.tasks.OnFailureListener
--import com.google.android.gms.tasks.OnSuccessListener
--import com.google.android.gms.tasks.Task
--import com.google.android.play.core.review.ReviewInfo
--import com.google.android.play.core.review.ReviewManager
--import java.text.SimpleDateFormat
--import java.util.Date
--import java.util.Locale
--import java.util.concurrent.Executor
--import kotlin.test.assertIs
- import kotlinx.coroutines.launch
- import kotlinx.coroutines.test.runTest
--import mozilla.components.support.test.assertUnused
--import mozilla.components.support.test.ext.joinBlocking
- import mozilla.components.support.test.robolectric.testContext
- import org.junit.Assert.assertEquals
--import org.junit.Assert.assertFalse
- import org.junit.Assert.assertNull
--import org.junit.Assert.assertTrue
- import org.junit.Rule
- import org.junit.Test
- import org.junit.runner.RunWith
-@@ -40,90 +24,75 @@ import org.mozilla.fenix.components.ReviewPromptAttemptResult.NotDisplayed
- import org.mozilla.fenix.components.ReviewPromptAttemptResult.Unknown
- import org.mozilla.fenix.helpers.FenixGleanTestRule
- import org.robolectric.RobolectricTestRunner
-+import kotlin.test.assertIs
-+import java.text.SimpleDateFormat
-+import java.util.Date
-+import java.util.Locale
- 
-+/**
-+ * Tests for the (GMS-free) [PlayStoreReviewPromptController].
-+ *
-+ * The controller wraps the Play Store In-App Review API; in a build without
-+ * GMS the prompt can never be displayed, so the production code reduces to
-+ * fixed results ([Unknown] / no-op). What still has real behavior — and is
-+ * therefore tested here — is the result *classification* from a ReviewInfo's
-+ * string form ([ReviewPromptAttemptResult.from]) and the Glean event
-+ * recording ([recordReviewPromptEvent]), which is how we'd know the flow was
-+ * even attempted if the API were ever restored.
-+ */
- @RunWith(RobolectricTestRunner::class)
- class PlayStoreReviewPromptControllerTest {
- 
-     @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
- 
--    @Test
--    fun `GIVEN activity is resumed WHEN tryPromptReview is called THEN launches review flow`() = runTest {
--        val reviewManager = SuccessfulReviewManager(testContext)
--        val controller =
--            PlayStoreReviewPromptController(
--                manager = reviewManager,
--                numberOfAppLaunches = { 5 },
--            )
--        launchActivity<ComponentActivity>().use { scenario ->
--            scenario.moveToState(Lifecycle.State.RESUMED)
--            scenario.onActivity { activity ->
--                activity.lifecycleScope.launch {
--                    controller.tryPromptReview(activity)
--
--                    assertTrue(reviewManager.promptHasBeenRequested)
--                }
--            }
--        }
--    }
-+    // ---- the GMS-free behavior of the stubbed controller ----
- 
-     @Test
--    fun `GIVEN activity is destroyed WHEN tryPromptReview is called THEN doesn't launch review flow`() = runTest {
--        val reviewManager = SuccessfulReviewManager(testContext)
--        val controller =
--            PlayStoreReviewPromptController(
--                manager = reviewManager,
-+    fun `GIVEN a GMS-free build WHEN tryPromptReview is called THEN the attempt is Unknown`() =
-+        runTest {
-+            val controller = PlayStoreReviewPromptController(
-                 numberOfAppLaunches = { 5 },
-             )
--        launchActivity<ComponentActivity>().use { scenario ->
--            scenario.moveToState(Lifecycle.State.RESUMED)
--            scenario.onActivity { activity ->
--                activity.lifecycleScope
--                    .launch {
--                        scenario.moveToState(Lifecycle.State.DESTROYED)
--                        controller.tryPromptReview(activity)
-+            launchActivity<ComponentActivity>().use { scenario ->
-+                scenario.moveToState(Lifecycle.State.RESUMED)
-+                scenario.onActivity { activity ->
-+                    activity.lifecycleScope.launch {
-+                        val result = controller.tryPromptReview(activity)
-+                        assertIs<Unknown>(result)
-                     }
--                    .joinBlocking()
-+                }
-             }
-         }
--        assertFalse(reviewManager.promptHasBeenRequested)
--    }
- 
-     @Test
--    fun `WHEN the reviews API fails THEN returns Error result`() = runTest {
--        val controller =
--            PlayStoreReviewPromptController(
--                manager = FailingReviewManager(),
--                numberOfAppLaunches = { 5 },
--            )
-+    fun `GIVEN a GMS-free build WHEN tryLaunchPlayStoreReview is called THEN nothing throws`() {
-+        val controller = PlayStoreReviewPromptController(
-+            numberOfAppLaunches = { 5 },
-+        )
-         launchActivity<ComponentActivity>().use { scenario ->
-             scenario.onActivity { activity ->
--                activity.lifecycleScope.launch {
--                    val result = controller.tryPromptReview(activity)
--
--                    assertIs<Error>(result)
--                }
-+                controller.tryLaunchPlayStoreReview(activity) { /* openInNewTab */ }
-             }
-         }
-     }
- 
-+    // ---- ReviewPromptAttemptResult.from: classifying the ReviewInfo string ----
-+
-     @Test
--    fun `WHEN review info contains 'isNoOp=false' THEN prompt was displayed`() {
-+    fun `WHEN review info contains isNoOp=false THEN prompt was displayed`() {
-         val displayState = ReviewPromptAttemptResult.from(createReviewInfoString("isNoOp=false"))
--
-         assertEquals(Displayed, displayState)
-     }
- 
-     @Test
--    fun `WHEN review info contains 'isNoOp=true' THEN prompt wasn't displayed`() {
-+    fun `WHEN review info contains isNoOp=true THEN prompt wasn't displayed`() {
-         val displayState = ReviewPromptAttemptResult.from(createReviewInfoString("isNoOp=true"))
--
-         assertEquals(NotDisplayed, displayState)
-     }
- 
-     @Test
--    fun `WHEN review info doesn't contain 'isNoOp' THEN prompt display state is unknown`() {
-+    fun `WHEN review info doesn't contain isNoOp THEN prompt display state is unknown`() {
-         val displayState = ReviewPromptAttemptResult.from(createReviewInfoString())
--
-         assertEquals(Unknown, displayState)
-     }
- 
-@@ -131,6 +100,8 @@ class PlayStoreReviewPromptControllerTest {
-         return "ReviewInfo{pendingIntent=PendingIntent{5b613b1: android.os.BinderProxy@46c8096}, $optionalArg}"
-     }
- 
-+    // ---- recordReviewPromptEvent: the Glean event ----
-+
-     @Test
-     fun reviewPromptWasDisplayed() {
-         testRecordReviewPromptEventRecordsTheExpectedData(Displayed, "true")
-@@ -178,83 +149,3 @@ class PlayStoreReviewPromptControllerTest {
-         }
-     }
- }
--
--private class SuccessfulReviewManager(context: Context) : ReviewManager {
--    var promptHasBeenRequested = false
--
--    private val wrapped = com.google.android.play.core.review.testing.FakeReviewManager(context)
--
--    override fun requestReviewFlow(): Task<ReviewInfo> {
--        val requestReviewFlow = wrapped.requestReviewFlow()
--        return SuccessfulTask(requestReviewFlow.result)
--    }
--
--    override fun launchReviewFlow(activity: Activity, reviewInfo: ReviewInfo): Task<Void?> {
--        promptHasBeenRequested = true
--        return VoidTask()
--    }
--}
--
--private class FailingReviewManager : ReviewManager {
--    override fun requestReviewFlow() = FailedTask<ReviewInfo>()
--
--    override fun launchReviewFlow(activity: Activity, reviewInfo: ReviewInfo) = assertUnused()
--}
--
--private class SuccessfulTask<T>(private val result: T) : CompleteTask<T>() {
--    override fun isSuccessful() = true
--
--    override fun getResult() = result
--
--    override fun <X : Throwable?> getResult(exceptionType: Class<X>) = result
--
--    override fun getException() = null
--}
--
--private class FailedTask<T> : CompleteTask<T>() {
--    override fun isSuccessful() = false
--
--    override fun getException() = RuntimeException("Unexpected exception.")
--}
--
--private open class CompleteTask<T> : FakeGmsTask<T>() {
--    override fun isComplete() = true
--
--    override fun isCanceled() = false
--
--    override fun addOnCompleteListener(activity: Activity, listener: OnCompleteListener<T>): Task<T> {
--        val isNotStopped = (activity as ComponentActivity).lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
--        if (isNotStopped) {
--            listener.onComplete(this)
--        }
--        return this
--    }
--}
--
--private class VoidTask : FakeGmsTask<Void?>()
--
--private open class FakeGmsTask<T> : Task<T>() {
--    override fun isSuccessful(): Boolean = assertUnused()
--
--    override fun isComplete(): Boolean = assertUnused()
--
--    override fun isCanceled(): Boolean = assertUnused()
--
--    override fun getResult(): T? = assertUnused()
--
--    override fun <X : Throwable?> getResult(exceptionType: Class<X>): T? = assertUnused()
--
--    override fun getException(): Exception? = assertUnused()
--
--    override fun addOnSuccessListener(listener: OnSuccessListener<in T>): Task<T> = assertUnused()
--
--    override fun addOnSuccessListener(executor: Executor, listener: OnSuccessListener<in T>): Task<T> = assertUnused()
--
--    override fun addOnSuccessListener(activity: Activity, listener: OnSuccessListener<in T>): Task<T> = assertUnused()
--
--    override fun addOnFailureListener(listener: OnFailureListener): Task<T> = assertUnused()
--
--    override fun addOnFailureListener(executor: Executor, listener: OnFailureListener): Task<T> = assertUnused()
--
--    override fun addOnFailureListener(activity: Activity, listener: OnFailureListener): Task<T> = assertUnused()
--}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
 index 2c9614dddf..a732221b81 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/components/metrics/MetricsUtilsTest.kt
@@ -666,12 +295,12 @@ index 2c9614dddf..a732221b81 100644
          const val ENGINE_SOURCE_IDENTIFIER = "google-2018"
      }
 diff --git a/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt b/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
-index c532d8ff9c..ebcc19d446 100644
+index 6581061..41d46de 100644
 --- a/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
 +++ b/mobile/android/gradle/plugins/conventions/src/main/java/org/mozilla/conventions/ProjectPlugin.kt
-@@ -586,7 +586,18 @@ class ProjectPlugin : Plugin<Project> {
-                 systemProperty("logging.test-mode", "true")
-                 systemProperty("javax.net.ssl.trustStoreType", "JKS")
+@@ -598,7 +598,18 @@ class ProjectPlugin : Plugin<Project> {
+                     )
+                 }
  
 -                testLogging.events = emptySet()
 +                // CI-visible test output (was emptySet(): a failing test
@@ -687,5 +316,58 @@ index c532d8ff9c..ebcc19d446 100644
 +                testLogging.showStackTraces = true
 +                testLogging.showCauses = true
  
-                 val listener = MozillaTestOutputListener(logger)
-                 addTestListener(listener)
+                 // Translates JUnit test events into Mozilla's TBPL-like textual format that
+                 // Taskcluster log parsing expects.
+diff --git a/mobile/android/fenix/app/src/test/java/com/google/android/play/core/review/testing/FakeReviewManager.java b/mobile/android/fenix/app/src/test/java/com/google/android/play/core/review/testing/FakeReviewManager.java
+new file mode 100644
+index 0000000..77f326a
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/com/google/android/play/core/review/testing/FakeReviewManager.java
+@@ -0,0 +1,47 @@
++package com.google.android.play.core.review.testing;
++
++import android.app.Activity;
++import android.content.Context;
++import android.os.Parcel;
++
++import com.google.android.gms.tasks.Task;
++import com.google.android.gms.tasks.Tasks;
++import com.google.android.play.core.review.ReviewInfo;
++import com.google.android.play.core.review.ReviewManager;
++
++/**
++ * Test double for Google Play's review Fake. The fork ships in-tree review
++ * dummies (com.google.android.play.core.review) instead of the Play Core
++ * artifact; this mirrors them for unit tests (upstream test imports).
++ */
++public final class FakeReviewManager implements ReviewManager {
++    private final Context context;
++
++    public FakeReviewManager(Context context) {
++        this.context = context;
++    }
++
++    @Override
++    public Task<ReviewInfo> requestReviewFlow() {
++        return Tasks.forResult(new ReviewInfo() {
++            @Override
++            public int describeContents() {
++                return 0;
++            }
++
++            @Override
++            public void writeToParcel(Parcel dest, int flags) {
++            }
++
++            @Override
++            public String toString() {
++                return "ReviewInfo{pendingIntent=null, }";
++            }
++        });
++    }
++
++    @Override
++    public Task<Void> launchReviewFlow(Activity activity, ReviewInfo reviewInfo) {
++        return Tasks.forResult(null);
++    }
++}

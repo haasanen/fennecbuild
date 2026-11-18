@@ -1,19 +1,19 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index 315a700eb2..3cb5cc1a44 100644
+index 83f0322..3d27859 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
-@@ -3,6 +3,10 @@
- android-gradle-plugin = "9.4.0" # Keep lint version in sync
- android-lint = "32.4.0"
- 
-+# CBOR (RFC 8949) for the in-process CTAP2 security-key stack (upokecenter;
-+# transitive deps: com.github.peteroupc:datautilities, :numbers)
+@@ -2,6 +2,10 @@
+ # AGP
+ android-gradle-plugin = "9.4.1" # Keep lint version in sync
+ android-lint = "32.4.1"
++# CBOR (in-process CTAP2/WebAuthN security-key stack replaces the microG
++# play-services-fido client; CBOR codec published to mavenLocal by CI)
 +cbor = "4.5.6"
 +
+ 
  # Kotlin
  coroutines = "1.11.0"
- kotlin = "2.4.20"
-@@ -223,6 +227,7 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
+@@ -229,6 +233,7 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
  
  # Google other
  accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
