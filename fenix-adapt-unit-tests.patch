@@ -197,3 +197,44 @@ index ecb9dc8dea..df23fd5908 100644
      }
  
      @Test
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/crashes/CrashReporterControllerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/crashes/CrashReporterControllerTest.kt
+index 48a614df113ea0495e1e42ae9b442674bb34be43..fd5d98f14a978d0c0c4475410a7477d0303fa1e4 100644
+--- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/crashes/CrashReporterControllerTest.kt
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/crashes/CrashReporterControllerTest.kt
+@@ -133,28 +133,32 @@
+     }
+ 
+     @Test
+     fun `GIVEN reportCrashes true, crash reporting enabled, and crash report setting set to Auto WHEN trying to submit crashes THEN all crashes should be submitted and then disposed off`() {
+         settings.crashReportChoice = CrashReportOption.Auto.label
+         controller = CrashReporterController(sessionId, 2, components, settings, navController, appStore)
+ 
+-        controller.submitPendingNonFatalCrashesIfNecessary(true)!!.joinBlocking()
++        // Fennec: crash reporting is hard-disabled here (fenix-liberate sets
++        // Settings.isCrashReportingEnabled = false), so no reporting Job is returned.
++        controller.submitPendingNonFatalCrashesIfNecessary(true)?.joinBlocking()
+ 
+-        verify { components.analytics.crashReporter.submitReport(crash) }
++        verify(exactly = 0) { components.analytics.crashReporter.submitReport(crash) }
+         assertTrue(appStore.state.nonFatalCrashes.isEmpty())
+     }
+ 
+     @Test
+     fun `GIVEN reportCrashes true, crash reporting enabled, and crash report setting set to Ask WHEN trying to submit crashes THEN all crashes should be submitted and then disposed off`() {
+         settings.crashReportChoice = CrashReportOption.Ask.label
+         controller = CrashReporterController(sessionId, 2, components, settings, navController, appStore)
+ 
+-        controller.submitPendingNonFatalCrashesIfNecessary(true)!!.joinBlocking()
++        // Fennec: crash reporting is hard-disabled here (fenix-liberate sets
++        // Settings.isCrashReportingEnabled = false), so no reporting Job is returned.
++        controller.submitPendingNonFatalCrashesIfNecessary(true)?.joinBlocking()
+ 
+-        verify { components.analytics.crashReporter.submitReport(crash) }
++        verify(exactly = 0) { components.analytics.crashReporter.submitReport(crash) }
+         assertTrue(appStore.state.nonFatalCrashes.isEmpty())
+     }
+ 
+     @Test
+     fun `GIVEN only one tab opened WHEN user closes the tab THEN navigate to Home`() {
+         controller = CrashReporterController(sessionId, 1, components, settings, navController, appStore)
+ 
