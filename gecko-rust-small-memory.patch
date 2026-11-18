@@ -1,8 +1,8 @@
 diff --git a/build/moz.configure/rust.configure b/build/moz.configure/rust.configure
-index 7dee81a..eb7f818 100644
+index 7dee81ac66..e24783b433 100644
 --- a/build/moz.configure/rust.configure
 +++ b/build/moz.configure/rust.configure
-@@ -998,13 +998,12 @@ set_config("RUST_PGO_LDFLAGS", rust_pgo_ldflags)
+@@ -998,13 +998,16 @@ set_config("RUST_PGO_LDFLAGS", rust_pgo_ldflags)
  # cross-language LTO.
  # Never enable when sancov is enabled to work around https://github.com/rust-lang/rust/issues/90300.
  # Never enable when coverage is enabled to work around https://github.com/rust-lang/rust/issues/90045.
@@ -17,12 +17,16 @@ index 7dee81a..eb7f818 100644
 +# on this builder: fat-LTO re-runs whole-crate LLVM passes on top of the
 +# CGU change above and pushed the geckoservo rustc job past 10 GiB during
 +# the 158 build. Setting the gate False turns off RUST_LTO_ELIGIBLE,
-+# the per-spec lto flag and -Cembed-bitcode in one place.
-+rust_lto_eligible = False
++# the per-spec lto flag and -Cembed-bitcode in one place. The constant
++# must be wrapped in depends(...): the configure sandbox assigns only
++# go through @depends/@template values — a bare `= False` raises
++# "Cannot assign `rust_lto_eligible` because it is neither a @depends
++# nor a @template".
++rust_lto_eligible = depends(developer_options)(lambda _: False)
  
  set_config("RUST_LTO_ELIGIBLE", True, when=rust_lto_eligible)
  
-@@ -1191,7 +1190,12 @@ set_config("MOZ_CARGO_PROGRAM_LDFLAGS_FILTER_OUT", cargo_ldflags_filter_out.prog
+@@ -1191,7 +1194,12 @@ set_config("MOZ_CARGO_PROGRAM_LDFLAGS_FILTER_OUT", cargo_ldflags_filter_out.prog
  # If this is a release build we want rustc to generate one codegen unit per
  # crate. This results in better optimization and less code duplication at the
  # cost of longer compile times.
