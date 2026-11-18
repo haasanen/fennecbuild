@@ -179,10 +179,10 @@ index 000000000000..ab6b3badbdb1
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/com/adjust/sdk/AdjustConfig.java b/mobile/android/fenix/app/src/main/java/com/adjust/sdk/AdjustConfig.java
 new file mode 100644
-index 000000000000..bb90fba181e0
+index 0000000000..309b8ed025
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/com/adjust/sdk/AdjustConfig.java
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,65 @@
 +/*
 + * Copyright (c) 2012-2017 adjust GmbH,
 + * http://www.adjust.com
@@ -217,6 +217,8 @@ index 000000000000..bb90fba181e0
 +    public static final String ENVIRONMENT_SANDBOX = "sandbox";
 +    public static final String ENVIRONMENT_PRODUCTION = "production";
 +
++    private OnAttributionChangedListener onAttributionChangedListener;
++
 +    public AdjustConfig(Context context, String appToken, String environment) {
 +    }
 +
@@ -224,6 +226,11 @@ index 000000000000..bb90fba181e0
 +    }
 +
 +    public void setOnAttributionChangedListener(OnAttributionChangedListener onAttributionChangedListener) {
++        this.onAttributionChangedListener = onAttributionChangedListener;
++    }
++
++    public OnAttributionChangedListener getOnAttributionChangedListener() {
++        return onAttributionChangedListener;
 +    }
 +
 +    public void enablePreinstallTracking() {
