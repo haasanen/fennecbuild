@@ -22,7 +22,7 @@ on:
       version_code:
         description: "versionCode (scheme XYZAR; R = revision)"
         required: false
-        default: "1600120"
+        default: "1600121"
 
 env:
   ANDROID_HOME: /usr/lib/android-sdk
@@ -214,7 +214,7 @@ jobs:
           # 120-129, 220-229... — h30..h119 are NOT addressable; after h29
           # the next code is <major>0 1 2 R (h120+). Never "+1" past h29.
           # Build-time only, same pattern as ProtonMail's -h<N> stamp.
-          VCODE=${{ inputs.version_code || '1600120' }}
+          VCODE=${{ inputs.version_code || '1600121' }}
           N=$((10#$VCODE % 1000))
           [ "$N" -eq 0 ] && N=1000
           echo "fork build number: h${N} (versionCode ${VCODE})"
@@ -228,7 +228,7 @@ jobs:
           # inputs.* are empty on push-triggered runs (defaults apply to
           # workflow_dispatch only) — fall back to the release version.
           # versionName = upstream base + our -h<N> build suffix (see above).
-          ./prebuild.sh "${{ inputs.version_name || '160.0.1' }}${{ steps.fbn.outputs.suffix }}" "${{ inputs.version_code || '1600120' }}"
+          ./prebuild.sh "${{ inputs.version_name || '160.0.1' }}${{ steps.fbn.outputs.suffix }}" "${{ inputs.version_code || '1600121' }}"
           df -h /
 
       - name: Compute unit-test fingerprint
@@ -241,7 +241,7 @@ jobs:
         id: tfp
         run: |
           chmod +x .github/workflows/test_fingerprint.sh
-          FINGERPRINT=$(bash .github/workflows/test_fingerprint.sh "${{ inputs.version_name || '160.0.1' }}" "${{ inputs.version_code || '1600120' }}")
+          FINGERPRINT=$(bash .github/workflows/test_fingerprint.sh "${{ inputs.version_name || '160.0.1' }}" "${{ inputs.version_code || '1600121' }}")
           echo "fingerprint=${FINGERPRINT}" >> "$GITHUB_OUTPUT"
           echo "unit-test fingerprint: ${FINGERPRINT}"
 
@@ -404,15 +404,22 @@ jobs:
       # switches the gecko target from armeabi-v7a (32-bit) to arm64-v8a.
       # The v2 obj state was configured+built for the WRONG ABI -> must not
       # restore; the next run builds cold and saves v3 (arm64) warm.
+      # v4 -> v5 rotation (run 44274378524, the 160.0.1 rebase): identical
+      # class as the 157 incident above. The v4 cache is 158-era; its
+      # generated backend.mk + third_party/angle/gen rsp list
+      # common/base/anglebase/trace_event/trace_event.h, which 160's
+      # re-vendored ANGLE no longer has -> program_serialize_data_version.py
+      # FileNotFoundError at `mach build export`. The v5 entry cannot
+      # prefix-match v4 -> cold 160 gecko build, saves v5 warm.
       - name: Restore phase-3 build dirs (incremental compile)
         uses: actions/cache/restore@v4.3.0
         with:
           path: |
             ${{ env.SRCLIB_DIR }}/MozFennec/obj
             ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-obj-v4
+          key: fennec-p3-obj-v5
           restore-keys: |
-            fennec-p3-obj-v4
+            fennec-p3-obj-v5
       - name: Publish CBOR + Glean to mavenLocal
         id: p3a
         run: bash .github/workflows/run_p3_stage.sh "cbor microg glean glean_as" p3a
@@ -547,7 +554,7 @@ jobs:
           path: |
             ${{ env.SRCLIB_DIR }}/MozFennec/obj
             ${{ env.SRCLIB_DIR }}/MozAppServices/target
-          key: fennec-p3-obj-v4
+          key: fennec-p3-obj-v5
 
       - name: Package Gecko (multi-locale)
         id: p3b2
@@ -705,7 +712,7 @@ jobs:
           [ -x "$BT/apksigner" ] || { echo "apksigner missing"; ls "$BT"; exit 1; }
           echo "$FENNEC_KEYSTORE_BASE64" | base64 -d > fennec-release.jks
           UNSIGNED="${{ steps.apk.outputs.apk }}"
-          SIGNED="Fennec-${{ inputs.version_code || '1600120' }}-${GITHUB_SHA::7}.apk"
+          SIGNED="Fennec-${{ inputs.version_code || '1600121' }}-${GITHUB_SHA::7}.apk"
           cp "$UNSIGNED" unsigned.apk
           "$BT/zipalign" -f 4 unsigned.apk aligned.apk
           "$BT/apksigner" sign \
@@ -731,16 +738,16 @@ jobs:
         run: |
           set -e
           ls -la Fennec-*.apk
-          TAG="fennec-${{ inputs.version_name || '160.0.1' }}-${{ inputs.version_code || '1600120' }}"
+          TAG="fennec-${{ inputs.version_name || '160.0.1' }}-${{ inputs.version_code || '1600121' }}"
           NOTES_FILE="$(mktemp)"
           {
-            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name || '160.0.1' }} (versionCode ${{ inputs.version_code || '1600120' }})"
+            echo "Fennec F-Droid fork — Firefox ${{ inputs.version_name || '160.0.1' }} (versionCode ${{ inputs.version_code || '1600121' }})"
             echo ""
             echo "Built from haasanen/fennecbuild @ ${GITHUB_SHA}"
             echo "Same base as the official Fennec F-Droid build; signed with the fork's permanent release key."
           } > "$NOTES_FILE"
           gh release create "$TAG" "Fennec-"*.apk \
-            --title "Fennec ${{ inputs.version_name || '160.0.1' }} (${{ inputs.version_code || '1600120' }})" \
+            --title "Fennec ${{ inputs.version_name || '160.0.1' }} (${{ inputs.version_code || '1600121' }})" \
             --notes-file "$NOTES_FILE" || \
           gh release upload "$TAG" "Fennec-"*.apk --clobber
 
