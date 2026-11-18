@@ -38,7 +38,7 @@ index 208e19f..4f6952b 100644
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
-@@ -83,11 +83,10 @@
+@@ -83,15 +83,14 @@
          // switching the auth provider without a restart.
          engine.settings.ipProtectionAuthProvider = if (settings.ipProtectionUseGpi) "gpi" else "fxa"
  
@@ -50,3 +50,7 @@ diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components
          )
      }
  
+     val storageSynchronizer by lazy {
+         IPProtectionStorageSynchronizer(
+             storage = eligibilityStorage,
+             store = store,
