@@ -14,20 +14,39 @@ diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Sett
 index 208e19f..4f6952b 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-@@ -2490,6 +2490,16 @@ class Settings(
+@@ -2490,6 +2490,20 @@ class Settings(
              default = { FxNimbus.features.searchConfigV3.value().enabled },
          )
  
-+    val unifiedPushRegistrationUrl: Preference<String> by preferenceFactory.getStringPreference(
-+        key = "unifiedpush_registration_url",
-+        default = "",
-+    )
++    /** Indicates if UnifiedPush can be used */
++    var enableUnifiedPush by
++        booleanPreference(
++            key = appContext.getPreferenceKey(R.string.pref_key_enable_unifiedpush),
++            default = true,
++        )
 +
-+    val unifiedPushRegistrationKey: Preference<String> by preferenceFactory.getStringPreference(
-+        key = "unifiedpush_registration_key",
-+        default = "",
-+    )
++    /** Indicates if UnifiedPush is used */
++    var useUnifiedPush by
++        booleanPreference(
++            key = appContext.getPreferenceKey(R.string.pref_key_use_unifiedpush),
++            default = false,
++        )
 +
      /** Get the current mode for how https-only is enabled. */
      fun getHttpsOnlyMode(): HttpsOnlyMode {
          return if (!shouldUseHttpsOnly) {
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/ipprotection/IPProtection.kt
+@@ -83,11 +83,10 @@
+         // switching the auth provider without a restart.
+         engine.settings.ipProtectionAuthProvider = if (settings.ipProtectionUseGpi) "gpi" else "fxa"
+ 
+         IPProtectionFeature(
+             store = store,
+             engine = engine,
+             accountManager = authSources.fxaAccountManager.value,
+-            extraAuthProvider = IPProtectionGpiProvider(authSources.integrityClient.value),
+         )
+     }
+ 
