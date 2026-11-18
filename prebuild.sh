@@ -225,6 +225,8 @@ find "$patches/a-s-overlay" -type f | while read -r src; do
 done
 # Remove Mozilla repositories substitution and explicitly add the required ones
 apply_patch "$patches/a-s-localize_maven.patch"
+# Remove "recommendations" dependency on locale
+apply_patch "$patches/a-s-recommendations-locale.patch"
 # Configure default search engines
 apply_patch "$patches/a-s-configure-default-search-engines.patch"
 # Select only the required architectures

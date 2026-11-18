@@ -1,14 +1,14 @@
 diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
-index db7d6a1f5a..315a700eb2 100644
+index d98dbc2a84c5..83f0322b1bfc 100644
 --- a/gradle/libs.versions.toml
 +++ b/gradle/libs.versions.toml
-@@ -55,17 +55,10 @@ work = "2.11.2"
+@@ -56,17 +56,10 @@ work = "2.12.0"
  
  # Google other
  accompanist = "0.37.3"
 -firebase-messaging = "25.0.2"
 -installreferrer = "2.2"
- ksp = "2.3.11"
+ ksp = "2.3.12"
  material = "1.14.0"
  mlkit-prompt = "1.0.0-beta4"
  osslicenses-plugin = "0.13.0"
@@ -20,15 +20,15 @@ index db7d6a1f5a..315a700eb2 100644
  protobuf = "4.36.1"
  
  # Gradle plugins
-@@ -113,6 +106,7 @@ jna = "5.19.1"
+@@ -116,6 +109,7 @@ jna = "5.19.1"
  json = "20260814"
  jsoup = "1.23.2"
  lottie = "6.7.1"
-+microg = "0.3.16.252432"
++microg = "0.3.17.252432"
  okhttp = "5.5.0"
  okio = "3.18.2"
- sentry = "8.55.0"
-@@ -130,7 +124,6 @@ kotlin-serialization = { module = "org.jetbrains.kotlin.plugin.serialization:org
+ sentry = "8.58.0"
+@@ -133,7 +127,6 @@ kotlin-serialization = { module = "org.jetbrains.kotlin.plugin.serialization:org
  kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
  kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
  kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -36,7 +36,7 @@ index db7d6a1f5a..315a700eb2 100644
  kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
  kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
  
-@@ -230,21 +223,15 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
+@@ -236,21 +229,15 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
  
  # Google other
  accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
